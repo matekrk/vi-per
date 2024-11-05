@@ -123,3 +123,11 @@ The results will be saved to the `results` folder.
 
 The figures can be reproduced by running the `__05__figures.py` script in the `src` folder. Furthermore, the figures for the GP example can be reproduced by running the gp_simulations notebook in the `notebooks` folder. The figures for the earthquake application can be reproduced by running the soil_liquefaction notebook in the `notebooks` folder. The figures will be saved to the `figures` folder.
 
+## Visdom
+to visualize on web, you have to start visdom server. Result is on localhost:8900
+1. create screen: 
+   screen -S visdom.8900
+2. start visdom server:
+   python -m visdom.server -p 8900
+3. leave screen: 
+   ctrl + a + d

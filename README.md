@@ -131,3 +131,7 @@ to visualize on web, you have to start visdom server. Result is on localhost:890
    python -m visdom.server -p 8900
 3. leave screen: 
    ctrl + a + d
+
+## Backbone and Celeba
+It is heavily based on https://github.com/pangwong/pytorch-multi-label-classifier/tree/master
+Checkout data dir on that github to proceed with data

@@ -7,8 +7,10 @@ import torch.distributions as dist
 import hamiltorch
 
 from torch.special import log_ndtr, ndtr
+import torch.nn.functional as F
 from torch.nn.functional import logsigmoid
 
+### KL
 
 def KL_mvn(m, S, mu, Sig):
     """
@@ -51,9 +53,11 @@ def KL_MC(m, s, mu, sig):
 
     x = d1.sample((1000,))
     return torch.mean(torch.sum(d1.log_prob(x) - d2.log_prob(x), 1))
- 
 
-def ELL_TB(m, s, y, X, l_max = 10.0, XX=None):
+
+### ELL
+
+def ELL_TB_squeezed(m, s, y, X, l_max = 10.0, XX=None):
     """
     Compute the expected negative log-likelihood
     :return: ELL
@@ -67,7 +71,7 @@ def ELL_TB(m, s, y, X, l_max = 10.0, XX=None):
     
     S = torch.sqrt(S)
 
-    l = torch.arange(1.0, l_max*2, 1.0, requires_grad=False, dtype=torch.float64)
+    l = torch.arange(1.0, l_max*2, 1.0, requires_grad=False, dtype=M.dtype)
 
     M = M.unsqueeze(1)
     S = S.unsqueeze(1)
@@ -90,22 +94,28 @@ def ELL_TB(m, s, y, X, l_max = 10.0, XX=None):
     return res
 
 
+def ELL_TB(m, s, y, X, l_max = 10.0, XX=None):
+    """
+    Compute the expected negative log-likelihood
+    :return: ELL
+    """
+    pass # TODO: add vbll implementation
 
-def ELL_TB_mvn(m, S, y, X, l_max = 10.0):
+def ELL_TB_mvn_squeezed(m, S, y, X, l_max = 10.0):
     """
     Compute the expected negative log-likelihood
     :return: ELL
     """
     M = X @ m
-    # this might be faster 
+    # this might be faster
     # S = (X.unsqueeze(1) @ S @ X.unsqueeze(2)).squeeze()
 
-    try: 
+    try:
         U = torch.linalg.cholesky(S)
         S = torch.sum((X @ U) ** 2, dim=1)
     except:
         S = torch.sum(X * (S @ X.t()).t(), dim=1)
-    
+
     S = torch.sqrt(S)
 
     l = torch.arange(1.0, l_max*2, 1.0, requires_grad=False, dtype=torch.float64)
@@ -130,11 +140,20 @@ def ELL_TB_mvn(m, S, y, X, l_max = 10.0):
     return res
 
 
-def ELL_MC(m, s, y, X, n_samples=1000):
+def ELL_TB_mvn(m, S, y, X, l_max = 10.0):
+    """
+    Compute the expected negative log-likelihood
+    :return: ELL
+    """
+    pass
+
+def ELL_MC_squeezed(m, s, y, X, n_samples=1000):
     """
     Compute the expected negative log-likelihood with monte carlo
     :return: ELL
     """
+    # print(f"ELL_MC: m={m} s={s}")
+
     M = X @ m
     # S = torch.sqrt(X ** 2 @ s ** 2)
     S = torch.sum(X ** 2 * s ** 2, dim=1)
@@ -149,8 +168,44 @@ def ELL_MC(m, s, y, X, n_samples=1000):
 
     return res
 
+def ELL_MC(m, s, y, X, n_samples=1000):
+    """
+    Compute the expected negative log-likelihood with monte carlo
+    :return: ELL
+    """
+    # d_norm = dist.Normal(torch.zeros_like(m), torch.ones_like(s))
+    # eps = d_norm.sample((n_samples,))
+    # samples = m + s * eps
+    # logits = torch.einsum('ij,kjl->kil', X, samples)
+    # logits = torch.mean(logits, dim=0)
+    # log_probs = F.log_softmax(logits, dim=-1)
+    # res = F.nll_loss(log_probs, y)
+    # # nn.BCEWithLogitsLoss(reduction='none')
 
-def ELL_MC_mvn(m, S, y, X, n_samples=1000):
+    d_norm = dist.Normal(torch.zeros_like(m), torch.ones_like(s))
+    eps = d_norm.sample((n_samples,))
+    samples = m + s * eps
+    logits = torch.einsum('ij,kjl->kil', X, samples)
+    logsumexp = torch.logsumexp(logits, dim=0)
+    log_likelihood = logits[torch.arange(n_samples), :, y]
+    mc_log_likelihood = torch.mean(log_likelihood - logsumexp, dim=0)
+    return mc_log_likelihood
+
+    """
+    # S = torch.sqrt(X ** 2 @ s ** 2)
+    S = torch.sum(X ** 2 * s ** 2, dim=1)
+    S = torch.sqrt(S)
+
+    norm = dist.Normal(torch.zeros_like(M), torch.ones_like(S))
+    samp = norm.sample((n_samples, ))
+    samp = M + S * samp
+
+    res =  torch.dot( - y, M) + \
+        torch.sum(torch.mean(torch.log1p(torch.exp(samp)), 0))
+    return res
+    """
+
+def ELL_MC_mvn_squeezed(m, S, y, X, n_samples=1000):
     """
     Compute the expected negative log-likelihood with monte carlo
     :return: ELL
@@ -158,12 +213,12 @@ def ELL_MC_mvn(m, S, y, X, n_samples=1000):
     M = X @ m
     # S = torch.diag(X @ S @ X.t())
 
-    try: 
+    try:
         U = torch.linalg.cholesky(S)
         S = torch.sum((X @ U) ** 2, dim=1)
     except:
         S = torch.sum(X * (S @ X.t()).t(), dim=1)
-    
+
     S = torch.sqrt(S)
 
     norm = dist.Normal(torch.zeros_like(M), torch.ones_like(S))
@@ -174,6 +229,13 @@ def ELL_MC_mvn(m, S, y, X, n_samples=1000):
         torch.sum(torch.mean(torch.log1p(torch.exp(samp)), 0))
 
     return res
+
+def ELL_MC_mvn(m, S, y, X, n_samples=1000):
+    """
+    Compute the expected negative log-likelihood with monte carlo
+    :return: ELL
+    """
+    pass
  
 
 def ELL_Jak(m, s, t, y, X):
@@ -221,17 +283,22 @@ def ELL_Jak_mvn(m, S, t, y, X):
 
     return res
 
+### ELBO
 
-def ELBO_TB(m, u, y, X, mu, sig, l_max = 10.0, XX=None):
+def ELBO_TB_squeezed(m, u, y, X, mu, sig, l_max = 10.0, XX=None, ell_coeff=1.0):
     """
     Compute the negative of the ELBO
     :return: ELBO
     """
     s = torch.exp(u)
-    return ELL_TB(m, s, y, X, l_max=l_max, XX=XX) + KL(m, s, mu, sig)
+    return ell_coeff * ELL_TB_squeezed(m, s, y, X, l_max, XX) + KL(m, s, mu, sig)
+
+def ELBO_TB(m, u, y, X, mu, sig, l_max = 10.0, XX=None, ell_coeff=1.0):
+    s = torch.exp(u)
+    return ell_coeff * ELL_TB(m, s, y, X, l_max=l_max, XX=XX) + KL(m, s, mu, sig)
 
 
-def ELBO_TB_mvn(m, u, y, X, mu, Sig, l_max = 10.0):
+def ELBO_TB_mvn_squeezed(m, u, y, X, mu, Sig, l_max = 10.0, XX=None, ell_coeff=1.0):
     """
     Compute the negative of the ELBO
     :return: ELBO
@@ -240,20 +307,38 @@ def ELBO_TB_mvn(m, u, y, X, mu, Sig, l_max = 10.0):
     L = torch.zeros(p, p, dtype=torch.double)
     L[torch.tril_indices(p, p, 0).tolist()] = u
     S = L.t() @ L
-    
-    return ELL_TB_mvn(m, S, y, X, l_max=l_max) + KL_mvn(m, S, mu, Sig)
+    return ell_coeff * ELL_TB_mvn_squeezed(m, S, y, X, l_max, XX) + KL(m, S, mu, Sig)
+
+def ELBO_TB_mvn(m, u, y, X, mu, Sig, l_max = 10.0, ell_coeff=1.0):
+    p = Sig.size()[0]
+    L = torch.zeros(p, p, dtype=torch.double)
+    L[torch.tril_indices(p, p, 0).tolist()] = u
+    S = L.t() @ L
+    return ell_coeff * ELL_TB_mvn(m, S, y, X, l_max=l_max) + KL_mvn(m, S, mu, Sig)
 
 
-def ELBO_MC(m, u, y, X, mu, sig, n_samples=1000):
+def ELBO_MC(m, u, y, X, mu, sig, n_samples=1000, ell_coeff=1.0):
+    s = torch.exp(u)
+    return ell_coeff * ELL_MC(m, s, y, X, n_samples) + KL(m, s, mu, sig)
+
+def ELBO_MC_squeezed(m, u, y, X, mu, sig, n_samples=1000, ell_coeff=1.0):
     """
     Compute the negative of the ELBO
     :return: ELBO
     """
     s = torch.exp(u)
-    return ELL_MC(m, s, y, X, n_samples) + KL(m, s, mu, sig)
+    return ell_coeff * ELL_MC_squeezed(m, s, y, X, n_samples) + KL(m, s, mu, sig)
 
 
-def ELBO_MC_mvn(m, u, y, X, mu, Sig, n_samples=1000):
+def ELBO_MC_mvn(m, u, y, X, mu, Sig, n_samples=1000, ell_coeff=1.0):
+    p = Sig.size()[0]
+    L = torch.zeros(p, p, dtype=torch.double)
+    L[torch.tril_indices(p, p, 0).tolist()] = u
+    S = L.t() @ L
+
+    return ell_coeff * ELL_MC_mvn_squeezed(m, S, y, X, n_samples) + KL_mvn(m, S, mu, Sig)
+
+def ELBO_MC_mvn_squeezed(m, u, y, X, mu, Sig, n_samples=1000, ell_coeff=1.0):
     """
     Compute the negative of the ELBO
     :return: ELBO
@@ -263,7 +348,7 @@ def ELBO_MC_mvn(m, u, y, X, mu, Sig, n_samples=1000):
     L[torch.tril_indices(p, p, 0).tolist()] = u
     S = L.t() @ L
 
-    return ELL_MC_mvn(m, S, y, X, n_samples) + KL_mvn(m, S, mu, Sig)
+    return ell_coeff * ELL_MC_mvn(m, S, y, X, n_samples) + KL_mvn(m, S, mu, Sig)
 
 
 def ELBO_Jak(m, s, t, y, X, mu, sig):

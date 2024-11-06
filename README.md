@@ -135,3 +135,17 @@ to visualize on web, you have to start visdom server. Result is on localhost:890
 ## Backbone and Celeba
 It is heavily based on https://github.com/pangwong/pytorch-multi-label-classifier/tree/master
 Checkout data dir on that github to proceed with data
+
+## Examples of commands:
+
+- If want to see visdom remember to initialize appropriate port + Activate conda.
+
+- Point-wise softmax
+```
+nohup python src/combine.py --dir "/shared/sets/datasets/vision/artificial_shapes/simpler_size_64" --rez_dir "/shared/results/pyla/multilabel/arti/" --mode "Train" --model "Lenet" --name "lenet_simple64_notsq_cpu" --batch_size 64 --gpu_ids -1 --input_channel 3 --load_size 64 --input_size 64 --mean [0,0,0] --std [1,1,1] --ratio "[0.94, 0.03, 0.03]" --shuffle --load_thread 8 --sum_epoch 30 --lr 0.001 --lr_mult_w 1.0 --lr_mult_b 1.0 --lr_decay_in_epoch 1 --display_port 8903 --validate_ratio 0.1 --top_k "(1,)" --score_thres 0.1 --html --display_train_freq 20 --display_validate_freq 20 --save_epoch_freq 1  --display_image_ratio 0.2 > out3.sh &
+```
+
+- Bayesian squeezed
+```
+python src/combine_bayesian.py --dir /shared/sets/datasets/vision/artificial_shapes/size_64 --rez_dir /shared/results/pyla/multilabel/arti --mode Train --model Lenet --binary_squeezed --name BayesSqueeze64Lenet --batch_size 1000 --gpu_ids 0 --input_channel 3 --load_size 64 --input_size 64 --mean \[0,0,0\] --std \[1,1,1\] --ratio \[0.94,\ 0.03,\ 0.03\] --shuffle --load_thread 8 --sum_epoch 50 --lr 0.0001 --weight_decay 0.0001 --lr_mult_w 1.0 --lr_mult_b 1.0 --lr_decay_in_epoch 1 --gradient_clipping 100.0 --display_port 8902 --validate_ratio 0.1 --top_k \(1,\) --score_thres 0.1 --display_train_freq 10 --display_validate_freq 10 --save_epoch_freq 1 --display_image_ratio 0.2 --bayesian --method tb --l_max 10
+```

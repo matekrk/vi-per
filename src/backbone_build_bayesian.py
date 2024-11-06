@@ -35,10 +35,10 @@ class BayesianLastLayerSqueezed(nn.Module):
 
         # Posterior - optimize W_dist (m) and u 
         self.W_dist = Normal # MultivariateNormal
-        self.W_mean = nn.Parameter(torch.randn(final_basemodel_output, num_class))
+        self.W_mean = nn.Parameter(torch.randn(final_basemodel_output, num_class, dtype=torch.double))
 
         if s_init is None:
-            self.u_init = torch.ones(final_basemodel_output * num_class) * -1 # , dtype=torch.double # torch.tensor([-1.] * self.W_mean.size(-1), dtype=torch.double)
+            self.u_init = torch.ones(final_basemodel_output * num_class, dtype=torch.double) * -1 # , dtype=torch.double # torch.tensor([-1.] * self.W_mean.size(-1), dtype=torch.double)
             self.s_init = torch.exp(self.u_init)
         else:
             self.s_init = s_init
@@ -95,16 +95,14 @@ class BayesianLastLayerSqueezed(nn.Module):
         #n_samples = 10
         #M = self.sample(method, n_samples)
         #probs = torch.mean(torch.sigmoid(x @ M), 0)
-        # analytical
-        probs = torch.sigmoid(self.W_mean/(torch.sqrt(1 + (pi**2/8.0) * (self.s**2).reshape_as(self.W_mean))))
-        probs = torch.clip(probs,min=0.,max=1.)
-        returns = torch.distributions.Bernoulli(probs = probs)
+        # analytical just take mean. Remember E[SX] != S[EX] which is torch.sigmoid(x @ self.W_mean)
+        probs = torch.sigmoid(x.to(self.W_mean.dtype) @ (self.W_mean/(torch.sqrt(1 + (pi/8.0) * (self.s**2).reshape_as(self.W_mean)))))
+        probs = torch.clip(probs, min=1e-6,max=1.-(1e-6))
+        returns = torch.distributions.Categorical(probs = probs)
         return BayesianLastLayerReturn(
-            returns,
-            # torch.distributions.Categorical(probs = self.predictive(x)), # or through sample
+            returns, # torch.distributions.Categorical(probs = self.predictive(x)), # or through sample
             self._get_train_loss_fn(x, method),
-            # self._get_val_loss_fn(x) FIXME: val loss
-            self._get_train_loss_fn(x, method)
+            self._get_train_loss_fn(x, method) # self._get_val_loss_fn(x) FIXME: val loss
         )
     
     def _get_train_loss_fn(self, x, method):
@@ -121,6 +119,7 @@ class BayesianLastLayerSqueezed(nn.Module):
     
     def bound(self, x, y, method, n_samples = None, l_max = None):
         ell_coeff = self.len_dataset / len(y)
+        x = x.to(torch.float64)
         y = y.to(x.dtype)
         assert (method in ["tb", "tb_mvn"] and l_max is not None) or (method in ["mc", "mc_mvn"] and n_samples is not None)
         if method == "tb":

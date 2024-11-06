@@ -49,8 +49,8 @@ class WebVisualizer():
         if len(self.win_info[data_type][phase]) == 0:
             for index in range(len(y)):
                 win_id = self.type2id[data_type]*len(y) + index
-                win = self.vis.line(X=np.array([0]),
-                                    Y=np.array([0]),
+                win = self.vis.line(X=np.array([x]),
+                                    Y=np.array([y[index]]),
                                     opts=dict(
                                         title=data_type + " of Attribute " + str(index) + " Over Time",
                                         xlabel="epoch",

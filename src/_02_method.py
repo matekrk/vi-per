@@ -71,7 +71,7 @@ def ELL_TB_squeezed(m, s, y, X, l_max = 10.0, XX=None):
     
     S = torch.sqrt(S)
 
-    l = torch.arange(1.0, l_max*2, 1.0, requires_grad=False, dtype=M.dtype)
+    l = torch.arange(1.0, l_max*2, 1.0, requires_grad=False, dtype=torch.double)
 
     M = M.unsqueeze(1)
     S = S.unsqueeze(1)

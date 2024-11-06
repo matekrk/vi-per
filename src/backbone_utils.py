@@ -16,24 +16,29 @@ def save_model(model, opt, epoch):
     if opt.cuda and torch.cuda.is_available():
         model.cuda(opt.devices[0])
 
-def modify_last_layer_lr(named_params, base_lr, lr_mult_w, lr_mult_b, bayesian = False):
+def modify_last_layer_lr(named_params, base_lr, lr_mult_w, lr_mult_b, bayesian = False, no_wd_last = False):
     params = list()
     if bayesian:
         for name, param in named_params:
-            params += [{'params': param, 'lr': base_lr * 1}]
-            if "BayesianLastLayer_" in name:
-                pass
-            else:
-                pass
-    else:
-        for name, param in named_params: 
             if 'bias' in name:
-                if 'FullyConnectedLayer_' in name:
+                if 'BayesianLastLayer' in name:
                     params += [{'params': param, 'lr': base_lr * lr_mult_b, 'weight_decay': 0}]
                 else:
                     params += [{'params': param, 'lr': base_lr * 2, 'weight_decay': 0}]
             else:
-                if 'FullyConnectedLayer_' in name:
+                if 'BayesianLastLayer' in name:
+                    params += [{'params': param, 'lr': base_lr * lr_mult_w, 'weight_decay': 0}]
+                else:
+                    params += [{'params': param, 'lr': base_lr * 1}]
+    else:
+        for name, param in named_params: 
+            if 'bias' in name:
+                if 'FullyConnectedLayer' in name:
+                    params += [{'params': param, 'lr': base_lr * lr_mult_b, 'weight_decay': 0}]
+                else:
+                    params += [{'params': param, 'lr': base_lr * 2, 'weight_decay': 0}]
+            else:
+                if 'FullyConnectedLayer' in name:
                     params += [{'params': param, 'lr': base_lr * lr_mult_w}]
                 else:
                     params += [{'params': param, 'lr': base_lr * 1}]

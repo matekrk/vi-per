@@ -45,6 +45,7 @@ class Options():
         self.parser.add_argument('--momentum', type=float, default=0.9, help='momentum of SGD')
         self.parser.add_argument('--weight_decay', type=float, default=1e-4, help='weight decay of SGD')
         self.parser.add_argument('--loss_weight', type=str, default='', help='list. Loss weight for cross entropy loss.For example set $loss_weight to [1, 0.8, 0.8] for a 3 labels classification')
+        self.parser.add_argument('--gradient_clipping', type=float, default=0.0, help='gradient clipping for optimization step.')
 
         ## for test
         self.parser.add_argument('--top_k', type=str, default='(1,)', help='tuple. We only take top k classification results into accuracy consideration')

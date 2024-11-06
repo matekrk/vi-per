@@ -4,11 +4,12 @@ import torch.nn as nn
 class SimpleMLP(nn.Module):
     def __init__(self, in_channel, hidden_size = 64):
         super(SimpleMLP, self).__init__()
-        self.fc1 = nn.Linear(in_channel, hidden_size)
+        self.fc1 = nn.Linear(in_channel * 64**2, hidden_size)
         self.relu = nn.ReLU()
         self.fc2 = nn.Linear(hidden_size, hidden_size)
 
     def forward(self, x):
+        x = x.flatten(start_dim=1)
         out = self.fc1(x)
         out = self.relu(out)
         out = self.fc2(out)

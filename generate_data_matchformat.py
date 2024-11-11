@@ -138,9 +138,16 @@ def check_overlap(shape1, shape2):
 
 def main():
 
-    N = 10000
+    no_overlap = False
+    coloured_figues = True
+    coloured_background = False
+    bias_classes = None
+    simpler = True
+
+    N = 200
     size =  64
     main_dir = f"/shared/sets/datasets/vision/artificial_shapes/"
+    path_to_save = os.path.join(main_dir, f"len{N}_" + ("simpler_" if simpler else "") + f"size_{size}")
 
     datasetdir = os.path.join(path_to_save, "images")
     datasetnpy = os.path.join(path_to_save, "data.npy")
@@ -148,13 +155,6 @@ def main():
     labelsnpy = os.path.join(path_to_save, "label.npy")
     labelstxt = os.path.join(path_to_save, "label.txt")
 
-    no_overlap = False
-    coloured_figues = True
-    coloured_background = False
-    bias_classes = None
-    simpler = False
-
-    path_to_save = os.path.join(main_dir, ("simpler_" if simpler else "") + f"size_{size}")
 
     dataset, labels = create_synthetic_dataset(N, size, datasetdir, datasettxt, labelstxt, no_overlap, coloured_figues, coloured_background, bias_classes, simpler)
     

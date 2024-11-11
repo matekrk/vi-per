@@ -71,7 +71,7 @@ def ELL_TB_squeezed(m, s, y, X, l_max = 10.0, XX=None):
     
     S = torch.sqrt(S)
 
-    l = torch.arange(1.0, l_max*2, 1.0, requires_grad=False, dtype=torch.double)
+    l = torch.arange(1.0, l_max*2, 1.0, requires_grad=False, dtype=torch.float64)
 
     M = M.unsqueeze(1)
     S = S.unsqueeze(1)
@@ -94,12 +94,22 @@ def ELL_TB_squeezed(m, s, y, X, l_max = 10.0, XX=None):
     return res
 
 
-def ELL_TB(m, s, y, X, l_max = 10.0, XX=None):
+def ELL_TB(m, s, y, X, noise_mean, noise_logdiag):
     """
     Compute the expected negative log-likelihood
     :return: ELL
     """
-    pass # TODO: add vbll implementation
+    #pred = self.logit_predictive(x) # z tego ma byc Norm
+    #noise = torch.distributions.Normal(noise_mean, torch.exp(noise_logdiag))
+    #pred += noise # z tego tez ma byc Norm 
+    #czyli
+    # M = X @ m
+    new_cov = torch.sum(X ** 2 * s ** 2, dim=1) + torch.exp(noise_logdiag)
+    pred = torch.distributions.Normal(m + noise_mean, torch.sqrt(torch.clip(new_cov, min = 1e-12)))
+    linear_term = pred.mean[torch.arange(X.shape[0]), y]
+    pre_lse_term = pred.mean + 0.5 * pred.covariance_diagonal
+    lse_term = torch.logsumexp(pre_lse_term, dim=-1)
+    return linear_term - lse_term
 
 def ELL_TB_mvn_squeezed(m, S, y, X, l_max = 10.0):
     """
@@ -285,60 +295,24 @@ def ELL_Jak_mvn(m, S, t, y, X):
 
 ### ELBO
 
-def ELBO_TB_squeezed(m, u, y, X, mu, sig, l_max = 10.0, XX=None, ell_coeff=1.0):
+def ELBO_TB_squeezed(m, u, y, X, mu, sig, l_max = 10.0, XX=None, data_size=None):
     """
     Compute the negative of the ELBO
     :return: ELBO
     """
     s = torch.exp(u)
-    return ell_coeff * ELL_TB_squeezed(m, s, y, X, l_max, XX) + KL(m, s, mu, sig)
+    return ELL_TB_squeezed(m, s, y, X, l_max, XX) / len(X) + KL(m, s, mu, sig) / data_size
 
-def ELBO_TB(m, u, y, X, mu, sig, l_max = 10.0, XX=None, ell_coeff=1.0):
+def ELBO_TB(m, u, y, X, mu, sig, noise_mean = None, noise_logdiag = None, data_size=1.0):
+    if noise_mean is None:
+        noise_mean = torch.zeros(m.shape[1])
+    if noise_logdiag is None:
+        noise_logdiag = torch.ones(m.shape[1])
     s = torch.exp(u)
-    return ell_coeff * ELL_TB(m, s, y, X, l_max=l_max, XX=XX) + KL(m, s, mu, sig)
+    return data_size * ELL_TB(m, s, y, X, noise_mean=noise_mean, noise_logdiag=noise_logdiag) + KL(m, s, mu, sig)
 
 
-def ELBO_TB_mvn_squeezed(m, u, y, X, mu, Sig, l_max = 10.0, XX=None, ell_coeff=1.0):
-    """
-    Compute the negative of the ELBO
-    :return: ELBO
-    """
-    p = Sig.size()[0]
-    L = torch.zeros(p, p, dtype=torch.double)
-    L[torch.tril_indices(p, p, 0).tolist()] = u
-    S = L.t() @ L
-    return ell_coeff * ELL_TB_mvn_squeezed(m, S, y, X, l_max, XX) + KL(m, S, mu, Sig)
-
-def ELBO_TB_mvn(m, u, y, X, mu, Sig, l_max = 10.0, ell_coeff=1.0):
-    p = Sig.size()[0]
-    L = torch.zeros(p, p, dtype=torch.double)
-    L[torch.tril_indices(p, p, 0).tolist()] = u
-    S = L.t() @ L
-    return ell_coeff * ELL_TB_mvn(m, S, y, X, l_max=l_max) + KL_mvn(m, S, mu, Sig)
-
-
-def ELBO_MC(m, u, y, X, mu, sig, n_samples=1000, ell_coeff=1.0):
-    s = torch.exp(u)
-    return ell_coeff * ELL_MC(m, s, y, X, n_samples) + KL(m, s, mu, sig)
-
-def ELBO_MC_squeezed(m, u, y, X, mu, sig, n_samples=1000, ell_coeff=1.0):
-    """
-    Compute the negative of the ELBO
-    :return: ELBO
-    """
-    s = torch.exp(u)
-    return ell_coeff * ELL_MC_squeezed(m, s, y, X, n_samples) + KL(m, s, mu, sig)
-
-
-def ELBO_MC_mvn(m, u, y, X, mu, Sig, n_samples=1000, ell_coeff=1.0):
-    p = Sig.size()[0]
-    L = torch.zeros(p, p, dtype=torch.double)
-    L[torch.tril_indices(p, p, 0).tolist()] = u
-    S = L.t() @ L
-
-    return ell_coeff * ELL_MC_mvn_squeezed(m, S, y, X, n_samples) + KL_mvn(m, S, mu, Sig)
-
-def ELBO_MC_mvn_squeezed(m, u, y, X, mu, Sig, n_samples=1000, ell_coeff=1.0):
+def ELBO_TB_mvn_squeezed(m, u, y, X, mu, Sig, l_max = 10.0, XX=None, data_size=1.0):
     """
     Compute the negative of the ELBO
     :return: ELBO
@@ -347,8 +321,48 @@ def ELBO_MC_mvn_squeezed(m, u, y, X, mu, Sig, n_samples=1000, ell_coeff=1.0):
     L = torch.zeros(p, p, dtype=torch.double)
     L[torch.tril_indices(p, p, 0).tolist()] = u
     S = L.t() @ L
+    return ELL_TB_mvn_squeezed(m, S, y, X, l_max, XX) / len(X) + KL(m, S, mu, Sig) / data_size
 
-    return ell_coeff * ELL_MC_mvn(m, S, y, X, n_samples) + KL_mvn(m, S, mu, Sig)
+def ELBO_TB_mvn(m, u, y, X, mu, Sig, l_max = 10.0, data_size=1.0):
+    p = Sig.size()[0]
+    L = torch.zeros(p, p, dtype=torch.double)
+    L[torch.tril_indices(p, p, 0).tolist()] = u
+    S = L.t() @ L
+    return data_size * ELL_TB_mvn(m, S, y, X, l_max=l_max) + KL_mvn(m, S, mu, Sig)
+
+
+def ELBO_MC(m, u, y, X, mu, sig, n_samples=1000, data_size=1.0):
+    s = torch.exp(u)
+    return data_size * ELL_MC(m, s, y, X, n_samples) + KL(m, s, mu, sig)
+
+def ELBO_MC_squeezed(m, u, y, X, mu, sig, n_samples=1000, data_size=1.0):
+    """
+    Compute the negative of the ELBO
+    :return: ELBO
+    """
+    s = torch.exp(u)
+    return data_size * ELL_MC_squeezed(m, s, y, X, n_samples) + KL(m, s, mu, sig)
+
+
+def ELBO_MC_mvn(m, u, y, X, mu, Sig, n_samples=1000, data_size=1.0):
+    p = Sig.size()[0]
+    L = torch.zeros(p, p, dtype=torch.double)
+    L[torch.tril_indices(p, p, 0).tolist()] = u
+    S = L.t() @ L
+
+    return data_size * ELL_MC_mvn_squeezed(m, S, y, X, n_samples) + KL_mvn(m, S, mu, Sig)
+
+def ELBO_MC_mvn_squeezed(m, u, y, X, mu, Sig, n_samples=1000, data_size=1.0):
+    """
+    Compute the negative of the ELBO
+    :return: ELBO
+    """
+    p = Sig.size()[0]
+    L = torch.zeros(p, p, dtype=torch.double)
+    L[torch.tril_indices(p, p, 0).tolist()] = u
+    S = L.t() @ L
+
+    return data_size * ELL_MC_mvn(m, S, y, X, n_samples) + KL_mvn(m, S, mu, Sig)
 
 
 def ELBO_Jak(m, s, t, y, X, mu, sig):

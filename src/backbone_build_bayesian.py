@@ -118,19 +118,19 @@ class BayesianLastLayerSqueezed(nn.Module):
         return loss_fn
     
     def bound(self, x, y, method, n_samples = None, l_max = None):
-        ell_coeff = self.len_dataset / len(y)
+        data_size = self.len_dataset
         x = x.to(torch.float64)
         y = y.to(x.dtype)
         assert (method in ["tb", "tb_mvn"] and l_max is not None) or (method in ["mc", "mc_mvn"] and n_samples is not None)
         if method == "tb":
             xx = x ** 2
-            value = sum(ELBO_TB_squeezed(w, u, y_single, x, mu, sig, l_max, xx, ell_coeff) for w, u, y_single, mu, sig in zip(self.W_mean.t(), self.u.view(-1, self.num_class).t(), y.t(), self.mu.t(), self.sig.t()))
+            value = sum(ELBO_TB_squeezed(w, u, y_single, x, mu, sig, l_max, xx, data_size) for w, u, y_single, mu, sig in zip(self.W_mean.t(), self.u.view(-1, self.num_class).t(), y.t(), self.mu.t(), self.sig.t()))
         elif method == "tb_mvn":
-            value = sum(ELBO_TB_mvn_squeezed(w, u, y_single, x, mu, Sig, l_max, ell_coeff) for w, u, y_single, mu, Sig in zip(self.W_mean.t(), self.u.view(-1, self.num_class).t(), y.t(), self.mu.t(), self.Sig.t()))
+            value = sum(ELBO_TB_mvn_squeezed(w, u, y_single, x, mu, Sig, l_max, data_size) for w, u, y_single, mu, Sig in zip(self.W_mean.t(), self.u.view(-1, self.num_class).t(), y.t(), self.mu.t(), self.Sig.t()))
         elif method == "mc":
-            value = sum(ELBO_MC_squeezed(w, u, y_single, x, mu, sig, n_samples, ell_coeff) for w, u, y_single, mu, sig in zip(self.W_mean.t(), self.u.view(-1, self.num_class).t(), y.t(), self.mu.t(), self.sig.t()))
+            value = sum(ELBO_MC_squeezed(w, u, y_single, x, mu, sig, n_samples, data_size) for w, u, y_single, mu, sig in zip(self.W_mean.t(), self.u.view(-1, self.num_class).t(), y.t(), self.mu.t(), self.sig.t()))
         elif method == "mc_mvn":
-            value = sum(ELBO_MC_mvn_squeezed(w, u, y_single, x, mu, Sig, n_samples, ell_coeff) for w, u, y_single, mu, Sig in zip(self.W_mean.t(), self.u.view(-1, self.num_class).t(), y.t(), self.mu.t(), self.Sig.t()))
+            value = sum(ELBO_MC_mvn_squeezed(w, u, y_single, x, mu, Sig, n_samples, data_size) for w, u, y_single, mu, Sig in zip(self.W_mean.t(), self.u.view(-1, self.num_class).t(), y.t(), self.mu.t(), self.Sig.t()))
         return value
     
     def sample(self, method, n_samples=10000):
@@ -182,6 +182,10 @@ class BayesianLastLayer(nn.Module):
         self.W_dist = Normal # MultivariateNormal
         self.W_mean = nn.Parameter(torch.randn(final_basemodel_output, num_class))
         # self.W_logdiag = nn.Parameter(torch.randn(basemodel_output + int(intercept), num_class) - 0.5 * torch.log(torch.tensor(num_class)))
+
+        # Noise
+        self.noise_mean = nn.Parameter(torch.zeros(final_basemodel_output), requires_grad = False)
+        self.noise_logdiag = nn.Parameter(torch.randn(final_basemodel_output) - 1)
 
         if s_init is None:
             self.u_init = torch.ones(final_basemodel_output * num_class) * -1 # , dtype=torch.double # torch.tensor([-1.] * self.W_mean.size(-1), dtype=torch.double)
@@ -265,7 +269,7 @@ class BayesianLastLayer(nn.Module):
         assert (method in ["tb", "tb_mvn"] and l_max is not None) or (method in ["mc", "mc_mvn"] and n_samples is not None)
         if method == "tb":
             xx = x ** 2
-            value = ELBO_TB(self.W_mean, self.u.view(-1, self.num_class), y, x, self.mu, self.sig, l_max, xx)
+            value = ELBO_TB(self.W_mean, self.u.view(-1, self.num_class), y, x, self.mu, self.sig, self.noise_mean, self.noise_logdiag)
         elif method == "tb_mvn":
             # assume updated
             value = ELBO_TB_mvn(self.W_mean, self.u.view(-1, self.num_class), y, x, self.mu, self.Sig, l_max)

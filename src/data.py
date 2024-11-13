@@ -94,12 +94,18 @@ class BaseDataset(torch.utils.data.Dataset):
         self.dataset = self._load_data(opt.data_dir+ '/' + data_type + '/data.txt')
         self.id2rid = id2rid
         self.data_size = len(self.dataset)
-        self.transformer = get_transformer(opt)
+        self.image_type = not opt.notimage_type
+        if self.image_type: 
+            self.transformer = get_transformer(opt)
 
     def __getitem__(self, index):
-        image_file, box, attr_ids = self.dataset[index % self.data_size]
         
-        input = load_image(image_file, box, self.opt, self.transformer)
+        if self.image_type:
+            image_file, box, attr_ids = self.dataset[index % self.data_size]
+            input = load_image(image_file, box, self.opt, self.transformer)
+        else:
+            data, box, attr_ids = self.dataset[index % self.data_size]
+            input = torch.tensor(data)
 
         # label
         labels = list()
@@ -130,6 +136,8 @@ class BaseDataset(torch.utils.data.Dataset):
         data = [None, None, None]
         if 'image_file' in line:
             data[0] = line["image_file"]
+        elif 'data' in line:
+            data[0] = line["data"]
         if 'box' in line:
             data[1] = line["box"]
         if 'id' in line:
@@ -158,20 +166,29 @@ class MultiLabelDataLoader():
             ratios = opt.ratio
             dataset = collections.defaultdict(list)
             with open(opt.dir + '/data.txt') as d:
-                for line in d.readlines():
+                lines = d.readlines()
+                for i_line, line in enumerate(lines):
                     line = json.loads(line)
                     # if data has been specified data_type yet, load data as what was specified before
                     if "type" in line:
                         dataset[line["type"]].append(line)
                         continue
                     # specified data_type randomly
-                    rand = random.random()
-                    if rand < ratios[0]:
-                        data_type = "Train"
-                    elif rand < ratios[0] + ratios[1]:
-                        data_type = "Validate"
+                    if opt.randomized_selection:
+                        rand = random.random()
+                        if rand < ratios[0]:
+                            data_type = "Train"
+                        elif rand < ratios[0] + ratios[1]:
+                            data_type = "Validate"
+                        else:
+                            data_type = "Test"
                     else:
-                        data_type = "Test"
+                        if i_line < ratios[0] * len(lines):
+                            data_type = "Train"
+                        elif i_line < (ratios[0] + ratios[1]) * len(lines):
+                            data_type = "Validate"
+                        else:
+                            data_type = "Test"
                     dataset[data_type].append(line)
             # write to file
             self._WriteDataToFile(dataset["Train"], train_dir)

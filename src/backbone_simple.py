@@ -2,9 +2,9 @@
 import torch.nn as nn
 
 class SimpleMLP(nn.Module):
-    def __init__(self, in_channel, hidden_size = 64):
+    def __init__(self, in_channel, image_size, hidden_size = 64):
         super(SimpleMLP, self).__init__()
-        self.fc1 = nn.Linear(in_channel * 64**2, hidden_size)
+        self.fc1 = nn.Linear(in_channel * image_size**2, hidden_size)
         self.relu = nn.ReLU()
         self.fc2 = nn.Linear(hidden_size, hidden_size)
 
@@ -13,6 +13,7 @@ class SimpleMLP(nn.Module):
         out = self.fc1(x)
         out = self.relu(out)
         out = self.fc2(out)
+        out = self.relu(out)
         return out
 
 class SimpleCNN(nn.Module):
@@ -87,14 +88,14 @@ class LeNet(nn.Module):
 #     model = LeNet(**kwargs)
 #     return model
 
-def SimpleMLP_templet(in_channel, pretrained=False):
-    model = SimpleMLP(in_channel)
+def SimpleMLP_templet(in_channel, input_size, hidden_size, pretrained=False):
+    model = SimpleMLP(in_channel, input_size, hidden_size)
     if pretrained:
         pass
     return model
 
-def SimpleConv_templet(in_channel, pretrained=False):
-    model = SimpleCNN(in_channel)
+def SimpleConv_templet(in_channel, hidden_size, pretrained=False):
+    model = SimpleCNN(in_channel, hidden_size)
     if pretrained:
         pass
     return model

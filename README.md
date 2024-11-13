@@ -142,10 +142,26 @@ Checkout data dir on that github to proceed with data
 
 - Point-wise softmax
 ```
-nohup python src/combine.py --dir "/shared/sets/datasets/vision/artificial_shapes/simpler_size_64" --rez_dir "/shared/results/pyla/multilabel/arti/" --mode "Train" --model "Lenet" --name "lenet_simple64_notsq_cpu" --batch_size 64 --gpu_ids -1 --input_channel 3 --load_size 64 --input_size 64 --mean [0,0,0] --std [1,1,1] --ratio "[0.94, 0.03, 0.03]" --shuffle --load_thread 8 --sum_epoch 30 --lr 0.001 --lr_mult_w 1.0 --lr_mult_b 1.0 --lr_decay_in_epoch 1 --display_port 8903 --validate_ratio 0.1 --top_k "(1,)" --score_thres 0.1 --html --display_train_freq 20 --display_validate_freq 20 --save_epoch_freq 1  --display_image_ratio 0.2 > out3.sh &
+nohup python src/combine.py --dir "/shared/sets/datasets/vision/artificial_shapes/size64_onlydisk_simplicity2_len10240_cbF_cfT_noF" --rez_dir "/shared/results/pyla/multilabel/arti/" --mode "Train" --model "Lenet" --name "lenet_64_notsq_cpu" --batch_size 64 --gpu_ids -1 --input_channel 3 --load_size 64 --input_size 64 --mean [0,0,0] --std [1,1,1] --ratio "[0.94, 0.03, 0.03]" --shuffle --load_thread 8 --sum_epoch 30 --lr 0.001 --lr_mult_w 1.0 --lr_mult_b 1.0 --lr_decay_in_epoch 1 --display_port 8903 --validate_ratio 1.0 --top_k "(1,)" --score_thres 0.1 --html --display_train_freq 20 --display_validate_freq 20 --save_epoch_freq 1  --display_image_ratio 0.2 > out3.sh &
 ```
 
 - Bayesian squeezed
 ```
-python src/combine_bayesian.py --dir /shared/sets/datasets/vision/artificial_shapes/size_64 --rez_dir /shared/results/pyla/multilabel/arti --mode Train --model Lenet --binary_squeezed --name BayesSqueeze64Lenet --batch_size 1000 --gpu_ids 0 --input_channel 3 --load_size 64 --input_size 64 --mean \[0,0,0\] --std \[1,1,1\] --ratio \[0.94,\ 0.03,\ 0.03\] --shuffle --load_thread 8 --sum_epoch 50 --lr 0.0001 --weight_decay 0.0001 --lr_mult_w 1.0 --lr_mult_b 1.0 --lr_decay_in_epoch 1 --gradient_clipping 100.0 --display_port 8902 --validate_ratio 0.1 --top_k \(1,\) --score_thres 0.1 --display_train_freq 10 --display_validate_freq 10 --save_epoch_freq 1 --display_image_ratio 0.2 --bayesian --method tb --l_max 10
+python src/combine_bayesian.py --dir /shared/sets/datasets/vision/artificial_shapes/size64_simplicity3_len10240_cbF_cfT_noF --rez_dir /shared/results/pyla/multilabel/arti --mode Train --model Lenet --binary_squeezed --name BayesSqueeze64Lenet --batch_size 1000 --gpu_ids 0 --input_channel 3 --load_size 64 --input_size 64 --mean \[0,0,0\] --std \[1,1,1\] --ratio \[0.94,\ 0.03,\ 0.03\] --shuffle --load_thread 8 --sum_epoch 50 --lr 0.0001 --weight_decay 0.0001 --lr_mult_w 1.0 --lr_mult_b 1.0 --lr_decay_in_epoch 1 --gradient_clipping 100.0 --display_port 8902 --validate_ratio 1.0 --top_k \(1,\) --score_thres 0.5 --display_train_freq 10 --display_validate_freq 10 --save_epoch_freq 1 --display_image_ratio 0.2 --bayesian --method tb --l_max 10
+```
+
+- Bayesian squeezed only disk
+```
+python src/combine_bayesian.py --dir /shared/sets/datasets/vision/artificial_shapes/size64_onlydisk_simplicity3_len10240_cbF_cfT_noF --rez_dir /shared/results/pyla/multilabel/arti --mode Train --model Lenet --binary_squeezed --name BayesSqueeze64LenetOnlyDisk --batch_size 256 --gpu_ids 0 --input_channel 3 --load_size 64 --input_size 64 --mean \[0,0,0\] --std \[1,1,1\] --ratio \[0.9,\ 0.05,\ 0.05\] --shuffle --load_thread 8 --sum_epoch 50 --lr 0.0001 --weight_decay 0.0001 --gamma 1.0 --lr_decay_in_epoch 1 --lr_mult_w 1.0 --lr_mult_b 1.0 --gradient_clipping 100.0 --display_port 8902 --validate_ratio 1.0 --top_k \(1,\) --score_thres 0.5 --display_train_freq 10 --display_validate_freq 10 --save_epoch_freq 1 --display_image_ratio 0.05 --bayesian --method tb --l_max 10
+```
+
+- Point-wise synthetic squeezed
+```
+nohup python src/combine.py --dir /home/pyla/bayesian/vi-per/data/synthetic/dim10_len10240_seed0 --rez_dir /shared/results/pyla/multilabel/synthetic --mode Train --model SimpleMLP --binary_squeezed --notimage_type --hidden_size 128 --name test0sqLikeColab --batch_size 1024 --gpu_ids 0 --input_channel 10 --load_size 1 --input_size 1 --ratio \[0.9,\ 0.05,\ 0.05\] --shuffle --load_thread 8 --loss_weight \[1.0,\ 0.0,\ 0.0,\ 0.0\] --sum_epoch 5 --lr 1.0 --momentum 0.9 --lr_mult_w 1.0 --lr_mult_b 1.0 --gamma 1.0 --lr_decay_in_epoch 1 --display_port 8910 --validate_ratio 1.0 --top_k \(1,\) --score_thres 0.5 --display_train_freq 1 --display_validate_freq 1 --save_epoch_freq 1 --display_image_ratio 0.0 > out1.sh &
+```
+
+- Bayesian synthetic squeezed
+```
+nohup python src/combine_bayesian.py --dir /home/pyla/bayesian/vi-per/data/synthetic/lownoise_dim10_le
+n10240_seed1 --rez_dir /shared/results/pyla/multilabel/synthetic --mode Train --model SimpleMLP --binary_squeezed --notimage_type --name Bayesnewdat0synth0test0sqlownoise --batch_size 256 --gpu_ids 0 --hidden_size 128 --input_channel 10 --load_size 1 --input_size 1 --ratio \[0.9,\ 0.05,\ 0.05\] --shuffle --load_thread 8 --sum_epoch 5 --lr 0.00001 --weight_decay 0.0 --lr_decay_in_epoch 1 --gamma 1.0 --lr_mult_w 1.0 --lr_mult_b 1.0 --display_port 8915 --validate_ratio 1.0 --top_k \(1,\) --score_thres 0.5 --display_train_freq 1 --display_validate_freq 1 --save_epoch_freq 1 --display_image_ratio 0.0 --bayesian --method tb --l_max 10 > out2.sh &
 ```

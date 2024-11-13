@@ -42,8 +42,8 @@ def forward_batch(model, criterion, inputs, targets, opt, phase):
 
     # bayesian calculate loss
     if model.binary_squeezed:
-        loss_list = list() # if want individual for later
-        targets = torch.stack(targets).t() # .to(dtype=torch.int32)
+        loss_list = list()
+        targets = torch.stack(targets).t()
         if phase in ["Train"]:
             loss = output.train_loss_fn(targets, opt.n_samples, opt.l_max)
         elif phase in ["Validate", "Test"]:
@@ -75,7 +75,8 @@ def forward_batch(model, criterion, inputs, targets, opt, phase):
 
 def forward_dataset(model, criterion, data_loader, opt):
     sum_batch = 0 
-    accuracy = list()
+    # accuracy = list()
+    metrics = list()
     avg_loss = list()
     for i, data in enumerate(data_loader):
         if opt.mode == "Train":
@@ -88,21 +89,38 @@ def forward_dataset(model, criterion, data_loader, opt):
         returns, loss, loss_list = forward_batch(model, criterion, inputs, targets, opt, "Validate")
         prediction = returns.probs
         
-        # predictions = forward_predictions(model, inputs)
         if model.binary_squeezed:
-            batch_accuracy = calc_accuracy_squeezed(prediction, targets, opt.score_thres)
+            metrics_list = calc_metrics_squeezed(prediction, targets, opt.score_thres)
         else:
-            batch_accuracy = calc_accuracy(prediction, targets, opt.score_thres, opt.top_k)
+            metrics_list = calc_metrics(prediction, targets, opt.score_thres, opt.top_k)
+        # if model.binary_squeezed:
+        #     batch_accuracy = calc_accuracy_squeezed(prediction, targets, opt.score_thres)
+        # else:
+        #     batch_accuracy = calc_accuracy(prediction, targets, opt.score_thres, opt.top_k)
         # accumulate accuracy
-        if len(accuracy) == 0:
-            accuracy = copy.deepcopy(batch_accuracy)
-            for index, item in enumerate(batch_accuracy):
+        # if len(accuracy) == 0:
+        #     accuracy = copy.deepcopy(batch_accuracy)
+        #     for index, item in enumerate(batch_accuracy):
+        #         for k,v in item.items():
+        #             accuracy[index][k]["ratio"] = v["ratio"]
+        # else:
+        #     for index, item in enumerate(batch_accuracy):
+        #         for k,v in item.items():
+        #             accuracy[index][k]["ratio"] += v["ratio"]
+
+        # accumulate metrics
+        if len(metrics) == 0:
+            metrics = copy.deepcopy(metrics_list)
+            for index, item in enumerate(metrics_list):
                 for k,v in item.items():
-                    accuracy[index][k]["ratio"] = v["ratio"]
+                    for m in v.keys():
+                        metrics_list[index][k][m] = v[m]
         else:
-            for index, item in enumerate(batch_accuracy):
+            for index, item in enumerate(metrics_list):
                 for k,v in item.items():
-                    accuracy[index][k]["ratio"] += v["ratio"]
+                    for m in v.keys():
+                        metrics_list[index][k][m] += v[m]
+
         # accumulate loss
         if len(avg_loss) == 0:
             avg_loss = copy.deepcopy(loss_list) 
@@ -110,12 +128,13 @@ def forward_dataset(model, criterion, data_loader, opt):
             for index, loss in enumerate(loss_list):
                 avg_loss[index] += loss
     # average on batches
-    for index, item in enumerate(accuracy):
+    for index, item in enumerate(metrics_list):
         for k,v in item.items():
-            accuracy[index][k]["ratio"] /= float(sum_batch)
+            for m in v.keys():
+                metrics_list[index][k][m] /= float(sum_batch)
     for index in range(len(avg_loss)):
         avg_loss[index] /= float(sum_batch)
-    return accuracy, avg_loss
+    return metrics_list, avg_loss
 
 def calc_accuracy_squeezed(outputs, targets, score_thres):
     batch_size = outputs.size(0)
@@ -268,8 +287,8 @@ def train(model, criterion, train_set, val_set, opt, labels=None):
                           weight_decay=opt.weight_decay)
     # define laerning rate scheluer
     scheduler = optim.lr_scheduler.StepLR(optimizer, 
-                                          step_size=opt.lr_decay_in_epoch,
-                                          gamma=opt.gamma)
+                                          opt.lr_decay_in_epoch,
+                                          opt.gamma)
     if labels is not None:
         rid2name, id2rid = labels
     
@@ -281,14 +300,25 @@ def train(model, criterion, train_set, val_set, opt, labels=None):
         epoch_start_t = time.time()
         epoch_batch_iter = 0
         logging.info('Begin of epoch %d' %(epoch))
-        for i, data in enumerate(train_set):
+        for i_data, data in enumerate(train_set):
             iter_start_t = time.time()
             # train 
             inputs, targets = data
             returns, loss, loss_list = forward_batch(model, criterion, inputs, targets, opt, "Train")
             optimizer.zero_grad()
             loss.backward()
-            print(loss.item())
+
+            total_norm = 0
+            for p in model.parameters():
+                param_norm = p.grad.data.norm(2)
+                total_norm += param_norm.item() ** 2
+            total_norm = total_norm ** 0.5
+            basemodel_norm = 0
+            for p in model.basemodel.parameters():
+                param_norm = p.grad.data.norm(2)
+                basemodel_norm += param_norm.item() ** 2
+            basemodel_norm = basemodel_norm ** 0.5
+
             if opt.gradient_clipping:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), opt.gradient_clipping)
             optimizer.step()
@@ -331,6 +361,12 @@ def train(model, criterion, train_set, val_set, opt, labels=None):
                     webvis.plot_points(x_axis, plot_precision, "Precision", "Train")
                     webvis.plot_points(x_axis, plot_recall, "Recall", "Train")
                     webvis.plot_points(x_axis, plot_f1, "F1_score", "Train")
+
+                    webvis.plot_points(x_axis, loss_list, "Loss", "Train")
+                    webvis.plot_points(x_axis, [basemodel_norm], "GradientBase", "Train")
+                    webvis.plot_points(x_axis, [total_norm], "GradientAll", "Train")
+                    webvis.plot_points(x_axis, [np.mean(loss_list)], "MeanLoss", "Train")
+                    webvis.plot_points(x_axis, [np.mean(plot_accuracy)], "MeanAccuracy", "Train")
             
             # display train data 
             if total_batch_iter % opt.display_data_freq == 0:
@@ -351,14 +387,23 @@ def train(model, criterion, train_set, val_set, opt, labels=None):
             
             # validate and display validate loss and accuracy
             if len(val_set) > 0  and total_batch_iter % opt.display_validate_freq == 0:
-                val_accuracy, val_loss = validate(model, criterion, val_set, opt)
-                x_axis = epoch + float(epoch_batch_iter)/train_batch_num
-                accuracy_list = [val_accuracy[i][opt.top_k[0]]["ratio"] for i in range(len(val_accuracy))]
+                val_metrics, val_loss = validate(model, criterion, val_set, opt)
+                plot_accuracy = [val_metrics[i][opt.top_k[0]]["accuracy"] for i in range(len(val_metrics))]
+                plot_precision = [val_metrics[i][opt.top_k[0]]["precision"] for i in range(len(val_metrics))]
+                plot_recall = [val_metrics[i][opt.top_k[0]]["recall"] for i in range(len(val_metrics))]
+                plot_f1 = [val_metrics[i][opt.top_k[0]]["f1_score"] for i in range(len(val_metrics))] 
+                # accuracy_list = [val_accuracy[i][opt.top_k[0]]["ratio"] for i in range(len(val_accuracy))]
+                # print_accuracy(val_accuracy, "Validate", epoch, total_batch_iter)
                 print_loss(val_loss, "Validate", epoch, total_batch_iter)
-                print_accuracy(val_accuracy, "Validate", epoch, total_batch_iter)
+                print_metrics(val_metrics, "Validate", epoch, total_batch_iter)
                 if opt.display_id > 0:
+                    x_axis = epoch + float(epoch_batch_iter)/train_batch_num
                     webvis.plot_points(x_axis, val_loss, "Loss", "Validate")
-                    webvis.plot_points(x_axis, accuracy_list, "Accuracy", "Validate")
+                    # webvis.plot_points(x_axis, accuracy_list, "Accuracy", "Validate")
+                    webvis.plot_points(x_axis, plot_accuracy, "Accuracy", "Validate")
+                    webvis.plot_points(x_axis, plot_precision, "Precision", "Validate")
+                    webvis.plot_points(x_axis, plot_recall, "Recall", "Validate")
+                    webvis.plot_points(x_axis, plot_f1, "F1_score", "Validate")
 
             # save snapshot 
             if total_batch_iter % opt.save_batch_iter_freq == 0:

@@ -58,9 +58,9 @@ def load_model(opt, num_classes, binary_squeezed, bayesian = False,
     # elif opt.model == "VGG16":
     #     templet = VGG16Templet(opt.input_channel, opt.pretrain)
     elif opt.model == "SimpleMLP":
-        templet = SimpleMLP_templet(opt.input_channel, opt.pretrain)
+        templet = SimpleMLP_templet(opt.input_channel, opt.input_size, opt.hidden_size, opt.pretrain)
     elif opt.model == "SimpleConv":
-        templet = SimpleConv_templet(opt.input_channel, opt.pretrain)
+        templet = SimpleConv_templet(opt.input_channel, opt.hidden_size, opt.pretrain)
     elif opt.model == "Lenet":
         option_id = 0 if opt.input_size == 28 else (1 if opt.input_size == 32 else 2)
         templet = Lenet_templet(opt.input_channel, option_id, opt.pretrain)

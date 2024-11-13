@@ -15,7 +15,7 @@ class WebVisualizer():
         self.use_html = (opt.html and (opt.mode == "Train"))
         self.name = opt.name
         self.saved = False
-        self.type2id = {"Loss": 0, "Accuracy": 1, "Precision": 2, "Recall": 3, "F1_score": 4, "Other": 5}
+        self.type2id = {"Loss": 0, "Accuracy": 1, "Precision": 2, "Recall": 3, "F1_score": 4, "MeanLoss": 5, "MeanAccuracy": 6, "GradientBase": 7, "GradientAll": 8, "Other": 9}
         self.phase2id = {"Train": 0, "Validate": 1, "Test": 2}
         
         def ManualType():
@@ -39,7 +39,7 @@ class WebVisualizer():
         self.saved = False
     
     """
-    type:  [Accuracy | Loss | Precision | Recall | F1_score |  Other]
+    type:  [Accuracy | Loss | Precision | Recall | F1_score | MeanLoss | MeanAccuracy | GradientBase | GradientAll | Other]
     phase: [Train | Validate | Test]
     """
     def plot_points(self, x, y, data_type, phase):
@@ -47,12 +47,14 @@ class WebVisualizer():
         self.plot_data[data_type][phase].append((x,y))
         # draw ininial line objects if not initialized
         if len(self.win_info[data_type][phase]) == 0:
-            for index in range(len(y)):
-                win_id = self.type2id[data_type]*len(y) + index
+            len_plotted = len(y)
+
+            for index in range(len_plotted):
+                win_id = self.type2id[data_type]*self.opt.class_num + index
                 win = self.vis.line(X=np.array([x]),
                                     Y=np.array([y[index]]),
                                     opts=dict(
-                                        title=data_type + " of Attribute " + str(index) + " Over Time",
+                                        title=data_type + (f" of Attribute {index}" if len_plotted == self.opt.class_num else "") + " Over Time",
                                         xlabel="epoch",
                                         ylabel=data_type,
                                         showlegend=True,
@@ -298,7 +300,7 @@ class MultiBinaryBCELoss(torch.nn.Module):
 
     def forward(self, inputs, targets):
         # Apply sigmoid to inputs
-        inputs = torch.sigmoid(inputs)
+        # inputs = torch.sigmoid(inputs)
         targets = torch.stack(targets).reshape_as(inputs).to(dtype=torch.int32)
         
         # Compute individual binary cross-entropy losses

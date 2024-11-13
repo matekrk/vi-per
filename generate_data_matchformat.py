@@ -39,8 +39,8 @@ def create_artificialshapes_dataset(N, img_size, datadir, datatxt, labeltxt, no_
     label_file = open(labeltxt, 'w')
     for shape in shapes:
         label_file.write(str(2) + f";{shape};{shape}" + '\n') # TODO: Support also counter for later
-        label_file.write(f"no_{shape}" + ';' + f"there_is_{shape}" + '\n')
-        label_file.write(f"yes_{shape}" + ';' + f"there_isno_{shape}" + '\n')
+        label_file.write(f"no_{shape}" + ';' + f"there_isno_{shape}" + '\n')
+        label_file.write(f"yes_{shape}" + ';' + f"there_is_{shape}" + '\n')
 
 
     for image_id in tqdm(range(N)):
@@ -154,7 +154,7 @@ def check_overlap(shape1, shape2):
 def main():
 
     size =  64
-    N = 200
+    N = 10240
     main_dir = f"/shared/sets/datasets/vision/artificial_shapes/"
 
     coloured_background = False

@@ -61,7 +61,7 @@ def create_artificialshapes_dataset(N, img_size, datadir, datatxt, labeltxt, no_
         lst_shapes = []
 
         for _ in range(num_shapes):
-            shape = np.random.choice(shapes)
+            shape = np.random.choice(shapes, p = bias_classes)
             color = np.random.choice(colors)
             size = np.random.randint(int(0.15*img_size), int(0.6*img_size))
             x = np.random.randint(0, img_size - size)
@@ -155,7 +155,7 @@ def main():
 
     size =  64
     N = 10240
-    main_dir = f"/shared/sets/datasets/vision/artificial_shapes/"
+    main_dir = f"../data/artificial_shapes/"
 
     coloured_background = False
     coloured_figues = True

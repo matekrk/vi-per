@@ -145,6 +145,23 @@ def create_artificialshapes_dataset(N, img_size, datadir, datatxt, labeltxt, no_
 
     return np.array(dataset), labels
 
+def load_artificial_shapes_dataset(path):
+    dataset = []
+    labels = []
+    datadir = os.path.join(path, "images")
+    datatxt = os.path.join(path, "data.txt")
+    labeltxt = os.path.join(path, "label.txt")
+    with open(datatxt, 'r') as f:
+        for line in f:
+            data = json.loads(line)
+            image_file = os.path.join(datadir, data['image_file'])
+            dataset.append(plt.imread(image_file))
+    with open(labeltxt, 'r') as f:
+        for line in f:
+            labels.append(line.strip().split(';'))
+    return np.array(dataset), labels
+
+
 def check_overlap(shape1, shape2):
     poly1 = shape1.get_path().to_polygons()[0]
     poly2 = shape2.get_path().to_polygons()[0]

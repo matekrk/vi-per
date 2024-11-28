@@ -1,7 +1,8 @@
 {
     "p": 64,
-    "K": 6,
+    "K": 2,
     "beta": 1.0,
+    "model_type": "logisticvi",
     "method": 0,
     "l_max": 10.0,
     "n_samples": 1000,
@@ -9,7 +10,9 @@
     "optimizer": "adam",
     "lr": 0.001,
     "n_epochs": 500,
-    "wd": 0.0,
+    "weight_decay": 0.0,
+    "lr_decay_in_epoch": 100,
+    "gamma": 1.0,
     "n_test_data_pred": 5,
     "f1_thres": 0.55,
     "path_to_results": "./results",
@@ -17,7 +20,7 @@
     "verbose": true,
     "data_channels": 3,
     "data_size": 64,
-    "N": 1024,
+    "N": 124,
     "N_test_ratio": 0.2,
     "coloured_background": false,
     "coloured_figues": false,
@@ -32,5 +35,12 @@
     ],
     "simplicity": 3,
     "main_dir": "/shared/sets/datasets/vision/artificial_shapes",
-    "wandb": false
+    "wandb": true,
+    "wandb_user_file": "wandb.txt",
+    "wandb_run_name": "demo_shapes_logistic_vi",
+    "wandb_tags": [
+        "logistic_vi",
+        "shapes"
+    ],
+    "wandb_offline": false
 }

@@ -1,19 +1,30 @@
+import os
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 import torch
 import torch.optim as optim
+import wandb
 
-def evaluate(model, X_test, y_test, data_size, K, prefix = ""):
+import warnings
+from sklearn.exceptions import UndefinedMetricWarning
+warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
+
+def evaluate(model, X_test, y_test, data_size, K, prefix = "", threshold = 0.5, verbose = False):
     # Get predictions
     with torch.no_grad():
         preds = model.predict(X_test)
-        loss = model.train_loss(X_test, y_test, data_size, verbose=False)
+        loss = model.test_loss(X_test, y_test, data_size, verbose=verbose)
 
     # Binarize predictions using a threshold (e.g., 0.5)
-    threshold = 0.5
     y_pred = (preds >= threshold).double()
     assert y_pred.shape == y_test.shape, f"y_pred.shape={y_pred.shape} != y_test.shape={y_test.shape}"
 
-    f1s = []
+    metrics = {
+        "f1": [],
+        "accuracy": [],
+        "precision": [],
+        "recall": [],
+        "loss": loss
+    }
 
     # Compute evaluation metrics (accuracy and F1-score) per label
     for k in range(K):
@@ -21,10 +32,14 @@ def evaluate(model, X_test, y_test, data_size, K, prefix = ""):
         precision = precision_score(y_test[:, k].numpy(), y_pred[:, k].numpy())
         recall = recall_score(y_test[:, k].numpy(), y_pred[:, k].numpy())
         f1 = f1_score(y_test[:, k].numpy(), y_pred[:, k].numpy())
-        f1s.append(f1)
-        print(f"{prefix} : Label {k}: Loss = {loss:.2f}, Accuracy = {acc:.2f}, Precision = {precision:.2f}, Recall = {recall:.2f}, F1-score = {f1:.2f}")
+        metrics["f1"].append(f1)
+        metrics["accuracy"].append(acc)
+        metrics["precision"].append(precision)
+        metrics["recall"].append(recall)
+        if verbose:
+            print(f"{prefix} : Label {k}: Loss = {loss:.2f}, Accuracy = {acc:.2f}, Precision = {precision:.2f}, Recall = {recall:.2f}, F1-score = {f1:.2f}")
 
-    return f1s
+    return metrics
 
 def create_optimizer_scheduler(args, model):
     # modify learning rate of last layer
@@ -52,11 +67,50 @@ def create_optimizer_scheduler(args, model):
         "adamw": optim.AdamW,
         "sgd": optim.SGD
     }
-    optimizer_class = optimizer_map[args.opti.lower()]
-    optimizer = optimizer_class(finetune_params, **common_params, **optimizer_specific_params[args.opti.lower()])
+    optimizer_class = optimizer_map[args.optimizer.lower()]
+    optimizer = optimizer_class(finetune_params, **common_params, **optimizer_specific_params[args.optimizer.lower()])
     
     # define learning rate scheduler
     scheduler = optim.lr_scheduler.StepLR(optimizer, 
                                           step_size=args.lr_decay_in_epoch,
                                           gamma=args.gamma)
     return optimizer, scheduler
+
+def wandb_unpack(file_path):
+    # first line wandb API key
+    # second line is wandb entity
+    # third line wandb project
+    return open(file_path).read().splitlines()
+
+def wandb_init(cfg):
+    key, entity, project = wandb_unpack(cfg.wandb_user_file)
+    wandb.login(key=key)
+    wandb.init(project=project, dir=os.path.join(cfg.path_to_results, cfg.name_exp), entity=entity, config=cfg, name=cfg.wandb_run_name, tags=cfg.wandb_tags, mode="offline" if cfg.wandb_offline else "online")
+    wandb.define_metric("train/step")
+    wandb.define_metric("train/epoch")
+    wandb.define_metric("train/*", step_metric="train/epoch")
+    wandb.define_metric("train/train_running_loss", step_metric="train/step")
+    wandb.define_metric("test/epoch")
+    wandb.define_metric("test/*", step_metric="test/epoch")
+
+def log(wandb_log, metrics = None, time = None, specific_key = None, evaluated = False, prefix = "train", particular_metric_key = None, particular_metric_value = None, figure = None):
+    if not wandb_log:
+        return
+    elif specific_key is not None:
+        assert metrics is not None, "Metrics must be provided"
+        wandb.log({specific_key: metrics[specific_key][-1]}, step=time)
+    elif particular_metric_key is not None:
+        assert particular_metric_value is not None, "Particular metric value must be provided"
+        wandb.log({particular_metric_key: particular_metric_value}, step=time)
+    elif evaluated:
+        assert metrics is not None, "Metrics must be provided"
+        assert time is not None, "Epoch must be provided"
+        wandb.log({f"{prefix}/loss": metrics["loss"], f"{prefix}/epoch": time}, step=time)
+        for k in range(len(metrics["f1"])): # K labels
+            wandb.log({f"{prefix}/{k}/f1": metrics["f1"][k]}, step=time)
+            wandb.log({f"{prefix}/{k}/accuracy": metrics["accuracy"][k]}, step=time)
+            wandb.log({f"{prefix}/{k}/precision": metrics["precision"][k]}, step=time)
+            wandb.log({f"{prefix}/{k}/recall": metrics["recall"][k]}, step=time)
+    elif figure is not None:
+        wandb.log({figure: figure}, step=time)
+    

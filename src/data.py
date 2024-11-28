@@ -1,8 +1,11 @@
 import os
+import sys
 from matplotlib import pyplot as plt
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
+# FIXME: vbll path // !pip install vbll & import vbll
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from generate_data_matchformat import create_artificialshapes_dataset, load_artificial_shapes_dataset
 
 def prepare_data_synthetic():
@@ -64,7 +67,8 @@ def create_binary_matrix(indices, num_cols):
     return np.array([[1 if j in row else 0 for j in range(num_cols)] for row in indices])
 
 def prepare_data_shapes(cfg):
-
+    if not isinstance(cfg, dict):
+        cfg = vars(cfg)
     size =  cfg.get("size", 64)
     N = cfg.get("N", 1024)
     N_test_ratio = cfg.get("N_test_ratio", 0.2)
@@ -81,12 +85,13 @@ def prepare_data_shapes(cfg):
     datasetdir = os.path.join(path_to_save, "images")
     datasettxt = os.path.join(path_to_save, "data.txt")
     labelstxt = os.path.join(path_to_save, "label.txt")
+    targettxt = os.path.join(path_to_save, "target.txt")
     print(f"Your data path will be: {path_to_save}")
 
     if os.path.isdir(path_to_save):
         dataset, labels = load_artificial_shapes_dataset(path_to_save)
     else:
-        dataset, labels = create_artificialshapes_dataset(N, size, datasetdir, datasettxt, labelstxt, no_overlap, coloured_figues, coloured_background, bias_classes, simplicity)
+        dataset, labels = create_artificialshapes_dataset(N, size, datasetdir, datasettxt, labelstxt, targettxt, no_overlap, coloured_figues, coloured_background, bias_classes, simplicity)
 
     shapes = ['disk', 'square', 'triangle', 'star', 'hexagon', 'pentagon']
 

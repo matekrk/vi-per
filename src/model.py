@@ -7,8 +7,8 @@ from objective import ELL_MC_MH, ELL_TB_MH, KL_MH, ELL_MC_mvn_MH, ELL_TB_mvn_MH,
 ##### SOFTMAX
 import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
-import vbll
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../vbll')))
+import vbll # !pip install vbll if not downloaded - FIXME: vbll
 
 """## Base model"""
 
@@ -50,6 +50,9 @@ class LLModel(nn.Module):
 
     def train_loss(self, X_batch, y_batch, data_size=None, verbose=False):
         raise ValueError("[LLModel] train_loss not implemented")
+    
+    def test_loss(self, X_batch, y_batch, data_size=None, verbose=False):
+        raise ValueError("[LLModel] test_loss not implemented")
 
     def predict(self, X):
         raise ValueError("[LLModel] predict not implemented")
@@ -174,7 +177,11 @@ class LogisticVI(LLModel):
         data_size = data_size or X_batch.shape[0]
         return -self.compute_ELBO(X_batch, y_batch, data_size, verbose=verbose)
 
-    def compute_ELBO(self, X_batch, y_batch, data_size, verbose=False):
+    def test_loss(self, X_batch, y_batch, data_size=None, verbose=False):
+        data_size = data_size or X_batch.shape[0]
+        return -self.compute_ELBO(X_batch, y_batch, data_size, verbose=verbose, other_beta=0.0)
+
+    def compute_ELBO(self, X_batch, y_batch, data_size, verbose=False, other_beta=None):
         """
         Compute the Evidence Lower Bound (ELBO) for a batch of data.
 
@@ -230,7 +237,8 @@ class LogisticVI(LLModel):
 
         mean_log_lik = likelihood/batch_size
         mean_kl_div = KL_div/data_size
-        ELBO = mean_log_lik - self.beta*mean_kl_div
+        beta = other_beta or self.beta
+        ELBO = mean_log_lik - beta*mean_kl_div
         if verbose:
             print(f"ELBO={ELBO:.2f} mean_log_lik={mean_log_lik:.2f} mean_kl_div={mean_kl_div:.2f}")
         return ELBO
@@ -308,6 +316,21 @@ class LogisticPointwise(LLModel):
             print(f"mean_bce_loss={mean_bce:.2f}  mean_reg={mean_reg:.2f}")
 
         return mean_bce + self.beta * mean_reg
+
+    def test_loss(self, X_batch, y_batch, data_size=None, verbose=False, other_beta=None):
+        data_size = data_size or X_batch.shape[0]
+
+        preds = self.predict(X_batch)
+        assert preds.shape == y_batch.shape, f"preds.shape={preds.shape} != y_batch.shape={y_batch.shape}"
+        loss = nn.BCELoss(reduction='mean')
+        mean_bce = loss(preds, y_batch)
+        mean_reg = self.regularization() / data_size
+
+        if verbose:
+            print(f"mean_bce_loss={mean_bce:.2f}  mean_reg={mean_reg:.2f}")
+
+        beta = other_beta or self.beta
+        return mean_bce + beta * mean_reg
 
     def regularization(self):
         log_prob = 0.
@@ -406,6 +429,19 @@ class VBLLVI(LLModel):
 
         return loss
 
+    def test_loss(self, X_batch, y_batch, data_size=None, verbose=False):
+        data_size = data_size or X_batch.shape[0]
+        X_processed = self.process(X_batch)
+
+        loss = 0.
+        for i, (head, y) in enumerate(zip(self.heads, y_batch.T)):
+            loss1 = head(X_processed).test_loss_fn(y.long())
+            loss += loss1
+            if verbose:
+                print(f"head={i} loss={loss1:.2f}")
+
+        return loss
+
     def predict(self, X):
         """
         Predict probabilities for each output given input data.
@@ -448,8 +484,24 @@ class VBLLPointwise(LLModel):
     def make_output_layer(self, num_classes):
         return nn.Linear(self.p, num_classes).to(torch.double)
 
-
     def train_loss(self, X_batch, y_batch, data_size=None, verbose=False):
+        data_size = data_size or X_batch.shape[0]
+        X_processed = self.process(X_batch)
+
+        loss = nn.CrossEntropyLoss(reduction='mean')
+        total_loss = 0.0
+
+        for i, (head,y) in enumerate(zip(self.heads,y_batch.T)):
+            pred = head(X_processed)
+            pred = F.log_softmax(pred, dim=1)
+            loss_head = loss(pred, y.to(torch.long)) 
+            total_loss += loss_head
+            if verbose:
+                print(f"head={i} loss={loss_head:.2f}")
+
+        return total_loss
+
+    def test_loss(self, X_batch, y_batch, data_size=None, verbose=False):
         data_size = data_size or X_batch.shape[0]
         X_processed = self.process(X_batch)
 
@@ -499,7 +551,8 @@ class VBLLPointwise(LLModel):
         all_preds.append(max_class)
       return torch.stack(all_preds, dim=1)
     
-def create_model(cfg):
+def create_model(cfg, backbone = None):
+    """
     p = cfg.get("p", 64)
     K = cfg.get("K", 6)
     method = cfg.get("method", 0)
@@ -508,16 +561,18 @@ def create_model(cfg):
     seed = cfg.get("seed", 1)
     backbone = cfg.get("backbone", None)
     vbll_cfg = cfg.get("vbll_cfg", None)
+    """
 
-    model_type = cfg.get("model_type", "logisticvi")
     model_classes = {
         "logisticvi": LogisticVI,
         "logisticpointwise": LogisticPointwise,
         "vbllvi": VBLLVI,
         "vbllpointwise": VBLLPointwise
     }
-    if model_type not in model_classes:
-        raise ValueError(f"Unknown model_type={model_type}")
+    if cfg.model_type not in model_classes:
+        raise ValueError(f"Unknown model_type={cfg.model_type}")
 
     #return model_classes[model_type](p, K, method=method, beta=beta, intercept=intercept, seed=seed, backbone=backbone, vbll_cfg=vbll_cfg)
-    return model_classes[model_type](**cfg)
+    model_class = model_classes[cfg.model_type]
+    model_args = {k: v for k, v in vars(cfg).items() if k in model_class.__init__.__code__.co_varnames}
+    return model_class(**model_args, backbone=backbone)

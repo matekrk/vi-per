@@ -32,7 +32,7 @@ class ConvNet(nn.Module):
         return x
 
 def get_backbone(cfg):
-    p = cfg.get("p", 64)
-    data_channels = cfg.get("data_channels", 3)
+    p = cfg.p if hasattr(cfg, 'p') else 64
+    data_channels = cfg.data_channels if hasattr(cfg, 'data_channels') else 3
     backbone = ConvNet(data_channels, p).to(torch.double)
     return backbone

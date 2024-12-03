@@ -89,9 +89,60 @@ def prepare_data_shapes(cfg):
     print(f"Your data path will be: {path_to_save}")
 
     if os.path.isdir(path_to_save):
-        dataset, labels = load_artificial_shapes_dataset(path_to_save)
+        dataset, labels = load_artificial_shapes_dataset(datasetdir, datasettxt, labelstxt, targettxt)
     else:
         dataset, labels = create_artificialshapes_dataset(N, size, datasetdir, datasettxt, labelstxt, targettxt, no_overlap, coloured_figues, coloured_background, bias_classes, simplicity)
+
+    shapes = ['disk', 'square', 'triangle', 'star', 'hexagon', 'pentagon']
+
+    label_ids = []
+    K_calc = 0
+    shape2ix = {shape: i for i, shape in enumerate(shapes)}
+    for labels1 in labels:
+        labels1 = [shape2ix[l[0]] for l in labels1]
+        if labels1:
+            K_calc = max(K_calc, max(labels1)+1)
+        label_ids.append(labels1)
+
+    K = cfg.get("K", K_calc)
+    y = create_binary_matrix(label_ids, K)
+    X = dataset
+    X = X * (1/255)
+
+    X_test = torch.tensor(X[-N_test:]).permute(0, 3, 1, 2).double()
+    y_test = torch.tensor(y[-N_test:]).double()
+    X = torch.tensor(X[:N_test]).permute(0, 3, 1, 2).double()
+    y = torch.tensor(y[:N_test]).double()
+
+    # print(N, K, X.shape, y.shape, X_test.shape, y_test.shape)
+    return X, y, X_test, y_test
+
+def prepare_data_shapes_ood(cfg):
+    if not isinstance(cfg, dict):
+        cfg = vars(cfg)
+    size =  cfg.get("size", 64)
+    N = cfg.get("N", 1024)
+    N_test_ratio = cfg.get("N_test_ratio", 0.2)
+    N_test = int(N * N_test_ratio)
+
+    coloured_background = cfg.get("coloured_background", False)
+    coloured_figues = cfg.get("coloured_figues", False)
+    no_overlap = cfg.get("no_overlap", False)
+    bias_classes_ood = cfg.get("bias_classes_ood", [0.0, 0.0, 1.0, 0.0, 0.0, 0.0])
+    simplicity = cfg.get("simplicity", 3)
+
+    main_dir = "/shared/sets/datasets/vision/artificial_shapes"
+    path_to_save = os.path.join(main_dir, f"size{size}_" + f"simplicity{simplicity}_" + f"len{N}_" + get_appendix(coloured_background, coloured_figues, no_overlap))
+    datasetdir = os.path.join(path_to_save, "images_ood")
+    datasettxt = os.path.join(path_to_save, "data_ood.txt")
+    labelstxt = os.path.join(path_to_save, "label_ood.txt")
+    targettxt = os.path.join(path_to_save, "target_ood.txt")
+    print(f"Your data path will be: {path_to_save}")
+
+    if os.path.isdir(path_to_save):
+        dataset, labels = load_artificial_shapes_dataset(datasetdir, datasettxt, labelstxt, targettxt)
+    else:
+        dataset, labels = create_artificialshapes_dataset(N_test, size, datasetdir, datasettxt, labelstxt, targettxt, no_overlap, coloured_figues, coloured_background, bias_classes_ood, simplicity)
 
     shapes = ['disk', 'square', 'triangle', 'star', 'hexagon', 'pentagon']
 

@@ -18,12 +18,16 @@ def evaluate(model, X_test, y_test, data_size, K, prefix = "", threshold = 0.5, 
     y_pred = (preds >= threshold).double()
     assert y_pred.shape == y_test.shape, f"y_pred.shape={y_pred.shape} != y_test.shape={y_test.shape}"
 
+    # for ECE
+    confidences, predictions = preds.max(dim=1)
+
     metrics = {
         "f1": [],
         "accuracy": [],
         "precision": [],
         "recall": [],
-        "loss": loss
+        "loss": loss.item(),
+        "ece": []
     }
 
     # Compute evaluation metrics (accuracy and F1-score) per label
@@ -36,18 +40,43 @@ def evaluate(model, X_test, y_test, data_size, K, prefix = "", threshold = 0.5, 
         metrics["accuracy"].append(acc)
         metrics["precision"].append(precision)
         metrics["recall"].append(recall)
+        per_class_ece = []
+        for cls in range(preds.shape[1]):
+            mask = y_test[:, k] == cls
+            if mask.sum() == 0:
+                continue
+            mask = mask.flatten()
+            per_class_ece.append(torch.abs(confidences[mask] - (predictions[mask] == cls).double()).mean().item())
+        metrics["ece"].append(per_class_ece)
+        ece_avg = torch.tensor(per_class_ece).mean().item()
         if verbose:
-            print(f"{prefix} : Label {k}: Loss = {loss:.2f}, Accuracy = {acc:.2f}, Precision = {precision:.2f}, Recall = {recall:.2f}, F1-score = {f1:.2f}")
+            print(f"{prefix} : Label {k}: Loss = {loss:.2f}, ECE = {ece_avg:.2f}, Accuracy = {acc:.2f}, Precision = {precision:.2f}, Recall = {recall:.2f}, F1-score = {f1:.2f}")
 
     return metrics
 
+def modify_last_layer_lr(named_params, base_lr, lr_mult_w, lr_mult_b, base_wd, no_wd_last = False):
+    params = list()
+    for name, param in named_params:
+        if 'backbone' in name:
+            if 'bias' in name:
+                params += [{'params': param, 'lr': base_lr, 'weight_decay': 0}]
+            else:
+                params += [{'params': param, 'lr': base_lr, 'weight_decay': base_wd}]
+        else:
+            #FIXME: for now it does not work for neither of model type
+            if 'bias' in name:
+                params += [{'params': param, 'lr': base_lr * lr_mult_b, 'weight_decay': 0}]
+            else:
+                params += [{'params': param, 'lr': base_lr * lr_mult_w, 'weight_decay': 0 if no_wd_last else base_wd}]
+    return params
+
 def create_optimizer_scheduler(args, model):
     # modify learning rate of last layer
-    finetune_params = model.parameters()
+    finetune_params = modify_last_layer_lr(model.named_parameters(), args.lr, args.lr_mult_w, args.lr_mult_b, args.wd, args.no_wd_last)
     # define optimizer
     common_params = {
         "lr": args.lr,
-        "weight_decay": args.weight_decay
+        "weight_decay": args.wd
     }
     optimizer_specific_params = {
         "adam": {
@@ -85,11 +114,11 @@ def wandb_unpack(file_path):
 def wandb_init(cfg):
     key, entity, project = wandb_unpack(cfg.wandb_user_file)
     wandb.login(key=key)
-    wandb.init(project=project, dir=os.path.join(cfg.path_to_results, cfg.name_exp), entity=entity, config=cfg, name=cfg.wandb_run_name, tags=cfg.wandb_tags, mode="offline" if cfg.wandb_offline else "online")
+    wandb.init(project=project, dir=os.path.join(cfg.path_to_results, cfg.name_exp, f"seed_{cfg.seed}"), entity=entity, config=cfg, name=cfg.wandb_run_name, tags=cfg.wandb_tags, mode="offline" if cfg.wandb_offline else "online")
     wandb.define_metric("train/step")
     wandb.define_metric("train/epoch")
     wandb.define_metric("train/*", step_metric="train/epoch")
-    wandb.define_metric("train/train_running_loss", step_metric="train/step")
+    wandb.define_metric("train/train/running_loss", step_metric="train/step")
     wandb.define_metric("test/epoch")
     wandb.define_metric("test/*", step_metric="test/epoch")
 
@@ -111,6 +140,8 @@ def log(wandb_log, metrics = None, time = None, specific_key = None, evaluated =
             wandb.log({f"{prefix}/{k}/accuracy": metrics["accuracy"][k]}, step=time)
             wandb.log({f"{prefix}/{k}/precision": metrics["precision"][k]}, step=time)
             wandb.log({f"{prefix}/{k}/recall": metrics["recall"][k]}, step=time)
+            for cls in range(len(metrics["ece"][k])):
+                wandb.log({f"{prefix}/{k}/ece_{cls}": metrics["ece"][k][cls]}, step=time)
     elif figure is not None:
-        wandb.log({figure: figure}, step=time)
+        wandb.log({"plots/summary": wandb.Image(figure)}, step=time)
     

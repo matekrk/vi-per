@@ -7,14 +7,25 @@ from objective import ELL_MC_MH, ELL_TB_MH, KL_MH, ELL_MC_mvn_MH, ELL_TB_mvn_MH,
 ##### SOFTMAX
 import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../vbll')))
-import vbll # !pip install vbll if not downloaded - FIXME: vbll
+
+# sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../vbll')))
+# import vbll # !pip install vbll if not downloaded - FIXME: vbll
+def load_vbll(vbll_path):
+    sys.path.append(os.path.abspath(vbll_path)) #os.path.join(vbll_path, '..')))
+    try:
+        import vbll
+        print("vbll found")
+    except:
+        print("vbll not found")
+        import subprocess
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "vbll"])
+        import vbll
 
 """## Base model"""
 
 class LLModel(nn.Module):
 
-    def __init__(self, p, K, beta=1.0, intercept=False, backbone=None, seed=1):
+    def __init__(self, p, K, beta=1.0, intercept=False, backbone=None):
         """
         Parameters:
         ----------
@@ -25,7 +36,6 @@ class LLModel(nn.Module):
         """
         super().__init__()
         print(f"[LLModel] beta={beta} input_dim={p} output_dim={K} intercept={intercept}")
-        torch.manual_seed(seed)
         self.intercept = intercept
         if intercept:
             p += 1
@@ -33,7 +43,6 @@ class LLModel(nn.Module):
         self.K = K
         self.backbone = backbone
         self.beta = beta
-        self.seed = seed
 
         self.params = []
         return p
@@ -101,16 +110,14 @@ class LogisticVI(LLModel):
         Whether to adaptively increase l during training. Default is False.
     n_samples : int, optional
         Number of samples for Monte Carlo estimation. Default is 500.
-    seed : int, optional
-        Random seed for reproducibility. Default is 1.
     backbone : torch.nn.Module, optional
         Backbone network to transform input features.
     """
 
     def __init__(self, p, K, method=0, beta=1.0, intercept=False,
-                 mu=None, sig=None, Sig=None, m_init=None, s_init=None,
-                 l_max=12.0, adaptive_l=False, n_samples=500, seed=1, backbone=None):
-        p = super().__init__(p, K, beta=beta, intercept=intercept, backbone=backbone, seed=seed)
+                 mu=None, sig=None, Sig=None, m_init=None, s_init=None, scale=1.0,
+                 l_max=12.0, adaptive_l=False, n_samples=500, backbone=None):
+        p = super().__init__(p, K, beta=beta, intercept=intercept, backbone=backbone)
 
         self.method = method
         self.l_max = l_max
@@ -124,12 +131,12 @@ class LogisticVI(LLModel):
             self.mu_list = [mu[:, k] for k in range(K)]
 
         if sig is None:
-            self.sig_list = [torch.ones(p, dtype=torch.double) for _ in range(K)]
+            self.sig_list = [torch.ones(p, dtype=torch.double) * scale for _ in range(K)]
         else:
             self.sig_list = [sig[:, k] for k in range(K)]
 
         if Sig is None:
-            self.Sig_list = [torch.eye(p, dtype=torch.double) for _ in range(K)]
+            self.Sig_list = [torch.eye(p, dtype=torch.double) * scale for _ in range(K)]
         else:
             self.Sig_list = Sig  # List of K covariance matrices of shape (p, p)
 
@@ -163,7 +170,7 @@ class LogisticVI(LLModel):
             u.requires_grad = True
 
         # Collect parameters for optimization
-        self.params = list(self.m_list) + list(self.u_list)
+        self.params = nn.ParameterList(list(self.m_list) + list(self.u_list))
         if self.backbone is not None:
             self.params += list(self.backbone.parameters())
 
@@ -272,10 +279,8 @@ class LogisticVI(LLModel):
 
 class LogisticPointwise(LLModel):
 
-    def __init__(self, p, K, beta=1.0, intercept=False, seed=1, backbone=None,
-                 m_init=None,
-                 mu=None, Sig=None):
-        p = super().__init__(p, K, beta=beta, intercept=intercept, backbone=backbone, seed=seed)
+    def __init__(self, p, K, beta=1.0, intercept=False, backbone=None, m_init=None, mu=None, Sig=None):
+        p = super().__init__(p, K, beta=beta, intercept=intercept, backbone=backbone)
 
         # Initialize prior parameters
         if mu is None:
@@ -299,7 +304,7 @@ class LogisticPointwise(LLModel):
             m.requires_grad = True
 
         # Collect parameters for optimization
-        self.params = list(self.m_list)
+        self.params = nn.ParameterList(self.m_list)
         if self.backbone is not None:
             self.params += list(self.backbone.parameters())
 
@@ -366,13 +371,14 @@ class LogisticPointwise(LLModel):
 
 """## VBLL models"""
 
-class VBLLVI(LLModel):
+class SoftmaxVBLL(LLModel):
 
-    def __init__(self, p, K, vbll_cfg, intercept=False, seed=1, backbone=None):
-        p = super().__init__(p, K, intercept=intercept, backbone=backbone, seed=seed)
+    def __init__(self, p, K, beta, vbll_cfg, intercept=False, backbone=None):
+        p = super().__init__(p, K, beta, intercept=intercept, backbone=backbone)
+        vbll_cfg.REGULARIZATION_WEIGHT = self.beta
         self.vbll_cfg = vbll_cfg
 
-        self.heads = [self.make_output_layer(num_hidden=p, num_classes=2) for k in range(K)]
+        self.heads = nn.ModuleList([self.make_output_layer(num_hidden=p, num_classes=2) for k in range(K)])
 
         # Collect parameters for optimization
         self.params = []
@@ -382,6 +388,7 @@ class VBLLVI(LLModel):
             self.params += list(head.parameters())
 
     def make_output_layer(self, **kwargs):
+        load_vbll(self.vbll_cfg.PATH)
         if self.vbll_cfg.TYPE == "disc":
             return self._make_disc_vbll_layer(cfg=self.vbll_cfg, **kwargs).double()
 
@@ -393,26 +400,28 @@ class VBLLVI(LLModel):
 
     def _make_disc_vbll_layer(self, num_hidden, num_classes, cfg):
         """ VBLL Discriminative classification head. """
+        import vbll
         return vbll.DiscClassification( num_hidden,
                                         num_classes,
-                                        cfg.REG_WEIGHT,
+                                        self.beta,
                                         softmax_bound=cfg.SOFTMAX_BOUND,
                                         # return_empirical=cfg.RETURN_EMPIRICAL,
                                         # softmax_bound_empirical=cfg.SOFTMAX_BOUND_EMPIRICAL,
-                                        parameterization = cfg.PARAM,
+                                        parameterization = cfg.PARAMETRIZATION,
                                         return_ood=cfg.RETURN_OOD,
                                         prior_scale=cfg.PRIOR_SCALE,
                                        )
 
     def _make_gen_vbll_layer(self, num_hidden, num_classes, cfg):
         """ VBLL Generative classification head. """
+        import vbll
         return vbll.GenClassification(  num_hidden,
                                         num_classes,
-                                        cfg.REG_WEIGHT,
+                                        self.beta,
                                         softmax_bound=cfg.SOFTMAX_BOUND,
                                         # return_empirical=cfg.RETURN_EMPIRICAL,
                                         # softmax_bound_empirical=cfg.SOFTMAX_BOUND_EMPIRICAL,
-                                        parameterization = cfg.PARAM,
+                                        parameterization = cfg.PARAMETRIZATION,
                                         return_ood=cfg.RETURN_OOD,
                                         prior_scale=cfg.PRIOR_SCALE)
 
@@ -435,7 +444,7 @@ class VBLLVI(LLModel):
 
         loss = 0.
         for i, (head, y) in enumerate(zip(self.heads, y_batch.T)):
-            loss1 = head(X_processed).test_loss_fn(y.long())
+            loss1 = head(X_processed).val_loss_fn(y.long())
             loss += loss1
             if verbose:
                 print(f"head={i} loss={loss1:.2f}")
@@ -466,13 +475,13 @@ class VBLLVI(LLModel):
         preds = torch.cat(preds, dim=1)  # Shape: (n_samples, K)
         return preds
 
-class VBLLPointwise(LLModel):
+class SoftmaxPointwise(LLModel):
 
-    def __init__(self, p, K, beta=0.0, num_classes_lst=None, intercept=False, seed=1, backbone=None):
-        p = super().__init__(p, K, beta=beta, intercept=intercept, backbone=backbone, seed=seed)
+    def __init__(self, p, K, beta=0.0, num_classes_lst=None, intercept=False, backbone=None):
+        p = super().__init__(p, K, beta=beta, intercept=intercept, backbone=backbone)
         self.num_classes_lst = [2] * K #hardcoded
 
-        self.heads = [self.make_output_layer(num_classes=self.num_classes_lst[k]) for k in range(K)]
+        self.heads = nn.ModuleList([self.make_output_layer(num_classes=self.num_classes_lst[k]) for k in range(K)])
 
         # Collect parameters for optimization
         self.params = []
@@ -558,7 +567,6 @@ def create_model(cfg, backbone = None):
     method = cfg.get("method", 0)
     beta = cfg.get("beta", 0.0)
     intercept = cfg.get("intercept", False)
-    seed = cfg.get("seed", 1)
     backbone = cfg.get("backbone", None)
     vbll_cfg = cfg.get("vbll_cfg", None)
     """
@@ -566,13 +574,13 @@ def create_model(cfg, backbone = None):
     model_classes = {
         "logisticvi": LogisticVI,
         "logisticpointwise": LogisticPointwise,
-        "vbllvi": VBLLVI,
-        "vbllpointwise": VBLLPointwise
+        "softmaxvbll": SoftmaxVBLL,
+        "softmaxpointwise": SoftmaxPointwise
     }
     if cfg.model_type not in model_classes:
         raise ValueError(f"Unknown model_type={cfg.model_type}")
 
-    #return model_classes[model_type](p, K, method=method, beta=beta, intercept=intercept, seed=seed, backbone=backbone, vbll_cfg=vbll_cfg)
+    #return model_classes[model_type](p, K, method=method, beta=beta, intercept=intercept, backbone=backbone, vbll_cfg=vbll_cfg)
     model_class = model_classes[cfg.model_type]
     model_args = {k: v for k, v in vars(cfg).items() if k in model_class.__init__.__code__.co_varnames}
     return model_class(**model_args, backbone=backbone)

@@ -161,8 +161,9 @@ cython_debug/
 
 # personal
 .vscode/
+wandb.txt
 data/
 slurms/
 results/
 cfgs/
-#commands/
+commands/

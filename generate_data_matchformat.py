@@ -10,7 +10,7 @@ import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning) 
 # for MatplotlibDeprecationWarning: The tostring_rgb function was deprecated in Matplotlib 3.8 and will be removed two minor releases later. Use buffer_rgba instead.
 
-def create_artificialshapes_dataset(N, img_size, datadir, datatxt, labeltxt, no_overlap=False, coloured_figues=False, coloured_background=False, bias_classes=None, simplicity=0):
+def create_artificialshapes_dataset(N, img_size, datadir, datatxt, labeltxt, targettxt, no_overlap=False, coloured_figues=False, coloured_background=False, bias_classes=None, simplicity=0):
     dataset = []
     labels = []
     colors = ['red' , 'green', 'blue', 'yellow', 'cyan', 'magenta'] if coloured_figues else ['cyan']
@@ -37,6 +37,7 @@ def create_artificialshapes_dataset(N, img_size, datadir, datatxt, labeltxt, no_
     os.makedirs(datadir, exist_ok=True)
     data_file = open(datatxt, 'w')
     label_file = open(labeltxt, 'w')
+    target_file = open(targettxt, 'w')
     for shape in shapes:
         label_file.write(str(2) + f";{shape};{shape}" + '\n') # TODO: Support also counter for later
         label_file.write(f"no_{shape}" + ';' + f"there_isno_{shape}" + '\n')
@@ -139,26 +140,31 @@ def create_artificialshapes_dataset(N, img_size, datadir, datatxt, labeltxt, no_
             'size': {'width': img_size, 'height': img_size}
         }
         data_file.write(json.dumps(data) + '\n')
+        target_file.write(json.dumps(lst_label) + '\n')
     
     data_file.close()
     label_file.close()
+    target_file.close()
+
+    # tmp
+
 
     return np.array(dataset), labels
 
-def load_artificial_shapes_dataset(path):
+def load_artificial_shapes_dataset(datadir, datatxt, labeltxt, targettxt):
     dataset = []
     labels = []
-    datadir = os.path.join(path, "images")
-    datatxt = os.path.join(path, "data.txt")
-    labeltxt = os.path.join(path, "label.txt")
     with open(datatxt, 'r') as f:
         for line in f:
             data = json.loads(line)
             image_file = os.path.join(datadir, data['image_file'])
             dataset.append(plt.imread(image_file))
-    with open(labeltxt, 'r') as f:
+    # with open(labeltxt, 'r') as f:
+    #     for line in f:
+    #         labels.append(line.strip().split(';'))
+    with open(targettxt, 'r') as f:
         for line in f:
-            labels.append(line.strip().split(';'))
+            labels.append(json.loads(line))
     return np.array(dataset), labels
 
 

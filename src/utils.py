@@ -115,33 +115,35 @@ def wandb_init(cfg):
     key, entity, project = wandb_unpack(cfg.wandb_user_file)
     wandb.login(key=key)
     wandb.init(project=project, dir=os.path.join(cfg.path_to_results, cfg.name_exp, f"seed_{cfg.seed}"), entity=entity, config=cfg, name=cfg.wandb_run_name, tags=cfg.wandb_tags, mode="offline" if cfg.wandb_offline else "online")
-    wandb.define_metric("train/step")
+    wandb.define_metric("iter")
+    wandb.define_metric("running_loss", step_metric="iter")
     wandb.define_metric("train/epoch")
     wandb.define_metric("train/*", step_metric="train/epoch")
-    wandb.define_metric("train/train/running_loss", step_metric="train/step")
     wandb.define_metric("test/epoch")
     wandb.define_metric("test/*", step_metric="test/epoch")
 
-def log(wandb_log, metrics = None, time = None, specific_key = None, evaluated = False, prefix = "train", particular_metric_key = None, particular_metric_value = None, figure = None):
+def log(wandb_log, metrics = None, time = None, time_metric=None, specific_key = None, evaluated = False, prefix = "train", particular_metric_key = None, particular_metric_value = None, figure = None):
     if not wandb_log:
         return
     elif specific_key is not None:
         assert metrics is not None, "Metrics must be provided"
-        wandb.log({specific_key: metrics[specific_key][-1]}, step=time)
+        if time_metric is not None:
+            wandb.log({time_metric: time})
+        wandb.log({specific_key: metrics[specific_key][-1]})
     elif particular_metric_key is not None:
         assert particular_metric_value is not None, "Particular metric value must be provided"
-        wandb.log({particular_metric_key: particular_metric_value}, step=time)
+        wandb.log({particular_metric_key: particular_metric_value})
     elif evaluated:
         assert metrics is not None, "Metrics must be provided"
         assert time is not None, "Epoch must be provided"
-        wandb.log({f"{prefix}/loss": metrics["loss"], f"{prefix}/epoch": time}, step=time)
+        wandb.log({f"{prefix}/loss": metrics["loss"], f"{prefix}/epoch": time})
         for k in range(len(metrics["f1"])): # K labels
-            wandb.log({f"{prefix}/{k}/f1": metrics["f1"][k]}, step=time)
-            wandb.log({f"{prefix}/{k}/accuracy": metrics["accuracy"][k]}, step=time)
-            wandb.log({f"{prefix}/{k}/precision": metrics["precision"][k]}, step=time)
-            wandb.log({f"{prefix}/{k}/recall": metrics["recall"][k]}, step=time)
+            wandb.log({f"{prefix}/{k}/f1": metrics["f1"][k]})
+            wandb.log({f"{prefix}/{k}/accuracy": metrics["accuracy"][k]})
+            wandb.log({f"{prefix}/{k}/precision": metrics["precision"][k]})
+            wandb.log({f"{prefix}/{k}/recall": metrics["recall"][k]})
             for cls in range(len(metrics["ece"][k])):
-                wandb.log({f"{prefix}/{k}/ece_{cls}": metrics["ece"][k][cls]}, step=time)
+                wandb.log({f"{prefix}/{k}/ece_{cls}": metrics["ece"][k][cls]})
     elif figure is not None:
-        wandb.log({"plots/summary": wandb.Image(figure)}, step=time)
+        wandb.log({"plots/summary": wandb.Image(figure)})
     

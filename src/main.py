@@ -97,7 +97,7 @@ def train(cfg):
     log(cfg.wandb, time=0, particular_metric_key="test/best_mean_f1", particular_metric_value = -1.0)
 
     metrics = {
-        "train/running_loss": [],
+        "running_loss": [],
         "train/running_loss_mean": [],
         "train_loss": [],
         "train_f1": [],
@@ -135,8 +135,8 @@ def train(cfg):
             loss = model.train_loss(X_batch, y_batch, data_size, verbose=verbose)
             loss.backward()
             epoch_loss += loss.item()
-            metrics["train/running_loss"].append(loss.item())
-            log(cfg.wandb, metrics, specific_key = "train/running_loss", time=epoch * len(data_loader) + iter)
+            metrics["running_loss"].append(loss.item())
+            log(cfg.wandb, metrics, specific_key = "running_loss", time=epoch * len(data_loader) + iter, time_metric="iter")
             optimizer.step()
             scheduler.step()
         if verbose:

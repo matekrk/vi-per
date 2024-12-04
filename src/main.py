@@ -69,6 +69,14 @@ default_config = {
 
 def train(cfg):
 
+    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if torch.cuda.is_available(): 
+        device = torch.device("cuda") 
+        print("Training on GPU") 
+    else: 
+        device = torch.device("cpu") 
+        print("Training on CPU")
+
     X, y, X_test, y_test = prepare_data_shapes(cfg)
     data_size = X.shape[0]
     data_loader = prepare_dataloader(X, y, batch_size=cfg.batch_size)
@@ -78,7 +86,7 @@ def train(cfg):
 
     backbone = get_backbone(cfg)
 
-    model = create_model(cfg, backbone)
+    model = create_model(cfg, backbone).to(device) # can later use next(model.parameters()).device ?
 
     model_init = copy.deepcopy(model)
 
@@ -86,9 +94,9 @@ def train(cfg):
     model.backbone.train()
     # model.m_list.train() #FIXME: handle this
 
-    evaluate(model, X, y, data_size, cfg.K, prefix="train")
-    evaluate(model, X_test, y_test, data_size, cfg.K, prefix="test")
-    evaluate(model, X_ood, y_ood, data_size, cfg.K, prefix="ood")
+    evaluate(model, X, y, data_size, cfg.K, device, prefix="train")
+    evaluate(model, X_test, y_test, data_size, cfg.K, device, prefix="test")
+    evaluate(model, X_ood, y_ood, data_size, cfg.K, device, prefix="ood")
 
     optimizer, scheduler = create_optimizer_scheduler(cfg, model)
 
@@ -131,6 +139,7 @@ def train(cfg):
 
         epoch_loss = 0
         for iter, (X_batch, y_batch) in enumerate(data_loader):
+            X_batch, y_batch = X_batch.to(device), y_batch.to(device)
             optimizer.zero_grad()
             loss = model.train_loss(X_batch, y_batch, data_size, verbose=verbose)
             loss.backward()
@@ -146,9 +155,9 @@ def train(cfg):
 
         if test_evaluate:
             epochs_eval.append(epoch)
-            train_metrics_eval = evaluate(model, X, y, data_size=data_size, K=cfg.K, prefix="train", verbose=verbose)
+            train_metrics_eval = evaluate(model, X, y, data_size, cfg.K, device, prefix="train", verbose=verbose)
             log(cfg.wandb, train_metrics_eval, epoch, evaluated=True, prefix="train")
-            test_metrics_eval = evaluate(model, X_test, y_test, data_size=data_size, K=cfg.K, prefix="test", verbose=verbose)
+            test_metrics_eval = evaluate(model, X_test, y_test, data_size, cfg.K, device, prefix="test", verbose=verbose)
             log(cfg.wandb, test_metrics_eval, epoch, evaluated=True, prefix="test")
             
             metrics["train/mean_f1"].append(sum(train_metrics_eval["f1"]) / len(train_metrics_eval["f1"]))
@@ -168,10 +177,10 @@ def train(cfg):
             metrics["test/mean_ece"].append(sum([sum(ece_list) for ece_list in test_metrics_eval["ece"]]) / (len(test_metrics_eval["ece"][0]) * len(test_metrics_eval["ece"])))
             log(cfg.wandb, metrics, epoch, specific_key = "test/mean_ece")
             if verbose and cfg.n_test_data_pred:
-                preds = model.predict(X_test[0:cfg.n_test_data_pred])
+                preds = model.predict(X_test[0:cfg.n_test_data_pred].to(device))
                 print("true:", y_test[0:cfg.n_test_data_pred].detach().cpu().numpy(), "\npred:", preds.detach().cpu().numpy())
 
-            ood_metrics_eval = evaluate(model, X_ood, y_ood, data_size=data_size, K=cfg.K, prefix="ood", verbose=verbose)
+            ood_metrics_eval = evaluate(model, X_ood, y_ood, data_size, cfg.K, device, prefix="ood", verbose=verbose)
             log(cfg.wandb, ood_metrics_eval, epoch, evaluated=True, prefix="ood")
             metrics["ood/mean_f1"].append(sum(ood_metrics_eval["f1"]) / len(ood_metrics_eval["f1"]))
             log(cfg.wandb, metrics, epoch, specific_key = "ood/mean_f1")

@@ -8,9 +8,11 @@ import warnings
 from sklearn.exceptions import UndefinedMetricWarning
 warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
 
-def evaluate(model, X_test, y_test, data_size, K, prefix = "", threshold = 0.5, verbose = False):
+def evaluate(model, X_test, y_test, data_size, K, device, prefix = "", threshold = 0.5, verbose = False):
     # Get predictions
     with torch.no_grad():
+        X_test = X_test.to(device)
+        y_test = y_test.to(device)
         preds = model.predict(X_test)
         loss = model.test_loss(X_test, y_test, data_size, verbose=verbose)
 
@@ -32,10 +34,10 @@ def evaluate(model, X_test, y_test, data_size, K, prefix = "", threshold = 0.5, 
 
     # Compute evaluation metrics (accuracy and F1-score) per label
     for k in range(K):
-        acc = accuracy_score(y_test[:, k].flatten().int().numpy(), y_pred[:, k].int().flatten().numpy())
-        precision = precision_score(y_test[:, k].numpy(), y_pred[:, k].numpy())
-        recall = recall_score(y_test[:, k].numpy(), y_pred[:, k].numpy())
-        f1 = f1_score(y_test[:, k].numpy(), y_pred[:, k].numpy())
+        acc = accuracy_score(y_test[:, k].flatten().int().cpu().numpy(), y_pred[:, k].int().flatten().cpu().numpy())
+        precision = precision_score(y_test[:, k].cpu().numpy(), y_pred[:, k].cpu().numpy())
+        recall = recall_score(y_test[:, k].cpu().numpy(), y_pred[:, k].cpu().numpy())
+        f1 = f1_score(y_test[:, k].cpu().numpy(), y_pred[:, k].cpu().numpy())
         metrics["f1"].append(f1)
         metrics["accuracy"].append(acc)
         metrics["precision"].append(precision)

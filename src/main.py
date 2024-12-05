@@ -38,6 +38,7 @@ default_config = {
     "gamma": 1.0,
     "lr_decay_in_epoch": 100,
     "wd": 0.0,
+    "last_layer_wd": None,
     "no_wd_last": False,
     "n_epochs": 500,
     "evaluate_freq": 10,

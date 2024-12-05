@@ -56,7 +56,9 @@ def evaluate(model, X_test, y_test, data_size, K, device, prefix = "", threshold
 
     return metrics
 
-def modify_last_layer_lr(named_params, base_lr, lr_mult_w, lr_mult_b, base_wd, no_wd_last = False):
+def modify_last_layer_lr(named_params, base_lr, lr_mult_w, lr_mult_b, base_wd, last_layer_wd = None, no_wd_last = False):
+    if last_layer_wd is None:
+        last_layer_wd = base_wd
     params = list()
     for name, param in named_params:
         if 'backbone' in name:
@@ -69,12 +71,12 @@ def modify_last_layer_lr(named_params, base_lr, lr_mult_w, lr_mult_b, base_wd, n
             if 'bias' in name:
                 params += [{'params': param, 'lr': base_lr * lr_mult_b, 'weight_decay': 0}]
             else:
-                params += [{'params': param, 'lr': base_lr * lr_mult_w, 'weight_decay': 0 if no_wd_last else base_wd}]
+                params += [{'params': param, 'lr': base_lr * lr_mult_w, 'weight_decay': 0 if no_wd_last else last_layer_wd}]
     return params
 
 def create_optimizer_scheduler(args, model):
     # modify learning rate of last layer
-    finetune_params = modify_last_layer_lr(model.named_parameters(), args.lr, args.lr_mult_w, args.lr_mult_b, args.wd, args.no_wd_last)
+    finetune_params = modify_last_layer_lr(model.named_parameters(), args.lr, args.lr_mult_w, args.lr_mult_b, args.wd, args.last_layer_wd, args.no_wd_last)
     # define optimizer
     common_params = {
         "lr": args.lr,

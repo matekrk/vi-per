@@ -8,8 +8,6 @@ from objective import ELL_MC_MH, ELL_TB_MH, KL_MH, ELL_MC_mvn_MH, ELL_TB_mvn_MH,
 import sys
 import os
 
-# sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../vbll')))
-# import vbll # !pip install vbll if not downloaded - FIXME: vbll
 def load_vbll(vbll_path):
     sys.path.append(os.path.abspath(vbll_path)) #os.path.join(vbll_path, '..')))
     try:
@@ -54,7 +52,7 @@ class LLModel(nn.Module):
             X_processed = X_batch
 
         if self.intercept:
-            X_processed = torch.cat((torch.ones(X_processed.size()[0], 1), X_processed), 1)
+            X_processed = torch.cat((torch.ones(X_processed.size()[0], 1, device=X_processed.device), X_processed), 1)
         return X_processed
 
     def train_loss(self, X_batch, y_batch, data_size=None, verbose=False):

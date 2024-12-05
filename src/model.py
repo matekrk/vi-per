@@ -113,7 +113,8 @@ class LogisticVI(LLModel):
     """
 
     def __init__(self, p, K, method=0, beta=1.0, intercept=False,
-                 mu=None, sig=None, Sig=None, m_init=None, s_init=None, scale=1.0,
+                 mu=None, sig=None, Sig=None, m_init=None, s_init=None, 
+                 prior_scale=1.0, posterior_mean_init_scale=1.0, posterior_var_init_add=0.0,
                  l_max=12.0, adaptive_l=False, n_samples=500, backbone=None):
         p = super().__init__(p, K, beta=beta, intercept=intercept, backbone=backbone)
 
@@ -129,24 +130,24 @@ class LogisticVI(LLModel):
             self.mu_list = [mu[:, k] for k in range(K)]
 
         if sig is None:
-            self.sig_list = [torch.ones(p, dtype=torch.double) * scale for _ in range(K)]
+            self.sig_list = [torch.ones(p, dtype=torch.double) * prior_scale for _ in range(K)]
         else:
             self.sig_list = [sig[:, k] for k in range(K)]
 
         if Sig is None:
-            self.Sig_list = [torch.eye(p, dtype=torch.double) * scale for _ in range(K)]
+            self.Sig_list = [torch.eye(p, dtype=torch.double) * prior_scale for _ in range(K)]
         else:
             self.Sig_list = Sig  # List of K covariance matrices of shape (p, p)
 
         # Initialize variational parameters
         if m_init is None:
-            self.m_list = [torch.randn(p, dtype=torch.double) for _ in range(K)]
+            self.m_list = [torch.randn(p, dtype=torch.double) * posterior_mean_init_scale for _ in range(K)]
         else:
             self.m_list = [m_init[:, k] for k in range(K)]
 
         if s_init is None:
             if method in [0, 4]:
-                self.u_list = [torch.tensor([-1.0] * p, dtype=torch.double) for _ in range(K)]
+                self.u_list = [torch.tensor([-1.0 + posterior_var_init_add] * p, dtype=torch.double) for _ in range(K)]
                 self.s_list = [torch.exp(u) for u in self.u_list]
             elif method in [1, 5]:
                 self.u_list = []
@@ -206,13 +207,13 @@ class LogisticVI(LLModel):
         batch_size = X_batch.shape[0]
 
         # Prepare lists for variational parameters and priors
-        m_list = self.m_list
-        mu_list = self.mu_list
+        m_list = [m.to(X_batch.device) for m in self.m_list]
+        mu_list = [mu.to(X_batch.device) for mu in self.mu_list]
         y_list = [y_batch[:, k] for k in range(self.K)]
 
         if self.method in [0, 4]:
-            s_list = [torch.exp(u) for u in self.u_list]
-            sig_list = self.sig_list
+            s_list = [torch.exp(u).to(X_batch.device) for u in self.u_list]
+            sig_list = [sig.to(X_batch.device) for sig in self.sig_list]
 
             if self.method == 0:
                 likelihood = -ELL_TB_MH(m_list, s_list, y_list, X_processed, l_max=self.l_terms)
@@ -224,8 +225,8 @@ class LogisticVI(LLModel):
         elif self.method in [1, 5]:
             L_list = []
             for u in self.u_list:
-                L = torch.zeros(self.p, self.p, dtype=torch.double)
-                tril_indices = torch.tril_indices(self.p, self.p, 0)
+                L = torch.zeros(self.p, self.p, dtype=torch.double, device=X_batch.device)
+                tril_indices = torch.tril_indices(self.p, self.p, 0).to(X_batch.device)
                 L[tril_indices[0], tril_indices[1]] = u
                 L_list.append(L)
 
@@ -267,7 +268,7 @@ class LogisticVI(LLModel):
 
         preds = []
         for m in self.m_list:
-            pred = torch.sigmoid(X_processed @ m)
+            pred = torch.sigmoid(X_processed @ m.to(X_processed.device))
             preds.append(pred.unsqueeze(1))
 
         preds = torch.cat(preds, dim=1)  # Shape: (n_samples, K)
@@ -361,7 +362,7 @@ class LogisticPointwise(LLModel):
 
         preds = []
         for m in self.m_list:
-            pred = torch.sigmoid(X_processed @ m)
+            pred = torch.sigmoid(X_processed @ m.to(X_processed.device))
             preds.append(pred.unsqueeze(1))
 
         preds = torch.cat(preds, dim=1)  # Shape: (n_samples, K)

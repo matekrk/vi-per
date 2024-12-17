@@ -9,7 +9,7 @@ import torch
 from backbone import get_backbone
 from data import prepare_dataloader, prepare_data_shapes
 from model import create_model
-from utils import create_optimizer_scheduler, evaluate, wandb_init, log
+from utils import compute_confusion_matrix, create_optimizer_scheduler, evaluate, wandb_init, log
 
 default_config = {
     "p": 64,
@@ -31,6 +31,10 @@ default_config = {
     "VBLL_RETURN_OOD": None,
     "VBLL_PRIOR_SCALE": None,
     "VBLL_WIDTH_SCALE": None,
+    "VBLL_WUMEAN_SCALE": None,
+    "VBLL_WULOGDIAG_SCALE": None,
+    "VBLL_WUOFFDIAG_SCALE": None,
+    "VBLL_NOISE_LABEL": None,
     "VBLL_PARAMETRIZATION": None,
     "VBLL_WISHART_SCALE": None,
     "optimizer": "adam",
@@ -197,7 +201,7 @@ def train(cfg):
     epochs = range(cfg.n_epochs)
     fig = plt.figure(figsize=(12, 4))
 
-    plt.subplot(1, 4, 1)
+    plt.subplot(1, 5, 1)
     plt.plot(epochs, metrics["train/running_loss_mean"], "o--", label="Train Running")
     plt.plot(epochs_eval, metrics["train_loss"], "o-", label="Train")
     plt.plot(epochs_eval, metrics["test_loss"], "^-", label="Test")
@@ -206,7 +210,7 @@ def train(cfg):
     plt.title("Loss")
     plt.legend()
 
-    plt.subplot(1, 4, 2)
+    plt.subplot(1, 5, 2)
     plt.plot(epochs_eval, metrics["train/mean_f1"], "o-", label="Train (mean)")
     plt.plot(epochs_eval, metrics["test/mean_f1"], "^-", label="Test (mean)")
     plt.xlabel("Epochs")
@@ -214,7 +218,7 @@ def train(cfg):
     plt.title("F1 Score")
     plt.legend()
 
-    plt.subplot(1, 4, 3)
+    plt.subplot(1, 5, 3)
     for k in range(cfg.K):
         plt.plot(epochs_eval, [metrics["train_accuracy"][s][k] for s in range(len(epochs_eval))], "o-", label=f"Train (Label {k})")
         plt.plot(epochs_eval, [metrics["test_accuracy"][s][k] for s in range(len(epochs_eval))], "^-", label=f"Test (Label {k})")
@@ -223,13 +227,26 @@ def train(cfg):
     plt.title("Accuracy")
     plt.legend()
 
-    plt.subplot(1, 4, 4)
+    plt.subplot(1, 5, 4)
     plt.plot(epochs_eval, metrics["test/mean_ece"], "^-", label="Test")
     plt.plot(epochs_eval, metrics["ood/mean_ece"], "s-", label="OOD")
     plt.xlabel("Epochs")
     plt.ylabel("ECE")
     plt.title("OOD vs Test ECE")
     plt.legend()
+
+    confusion_matrix = compute_confusion_matrix(model, X_test, y_test, cfg.K, device, threshold=cfg.f1_thres)
+    ax = plt.subplot(1, 5, 5)
+    cmap = plt.get_cmap('RdYlGn')
+    for i in range(cfg.K):
+        for j in range(cfg.K):
+            ax.text(j, i, confusion_matrix[i, j].item(), ha='center', va='center', fontsize=6, color='black')
+    cax = ax.matshow(confusion_matrix, cmap=cmap)
+    plt.xticks(range(cfg.K), [f"A {k}" for k in range(cfg.K)])
+    plt.xlabel("Predicted")
+    plt.ylabel("True")
+    plt.title("Final Confusion Matrix")
+    plt.colorbar(cax, ax=ax)
 
     plt.tight_layout()
     plt.savefig(os.path.join(cfg.path_to_results, cfg.name_exp, f"seed_{cfg.seed}", "metrics.png"))

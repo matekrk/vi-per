@@ -56,6 +56,19 @@ def evaluate(model, X_test, y_test, data_size, K, device, prefix = "", threshold
 
     return metrics
 
+def compute_confusion_matrix(model, X_test, y_test, K, device, threshold = 0.5):
+    # works for binary classification
+    with torch.no_grad():
+        X_test = X_test.to(device)
+        y_test = y_test.to(device)
+        preds = model.predict(X_test)
+    y_pred = (preds >= threshold).double()
+    confusion_matrix = torch.zeros(K, K)
+    for i in range(K):
+        for j in range(K):
+            confusion_matrix[i, j] = torch.sum((y_test[:, i] == 1) & (y_pred[:, j] == 1))
+    return confusion_matrix
+
 def modify_last_layer_lr(named_params, base_lr, lr_mult_w, lr_mult_b, base_wd, last_layer_wd = None, no_wd_last = False):
     if last_layer_wd is None:
         last_layer_wd = base_wd

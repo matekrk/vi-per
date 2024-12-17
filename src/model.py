@@ -224,16 +224,18 @@ class LogisticVI(LLModel):
 
         elif self.method in [1, 5]:
             L_list = []
-            for u in self.u_list:
+            u_list = [u.to(X_batch.device) for u in self.u_list]
+            for u in u_list:
                 L = torch.zeros(self.p, self.p, dtype=torch.double, device=X_batch.device)
                 tril_indices = torch.tril_indices(self.p, self.p, 0).to(X_batch.device)
                 L[tril_indices[0], tril_indices[1]] = u
                 L_list.append(L)
 
             S_list = [L @ L.t() for L in L_list]
+            Sig_list = [Sig.to(X_batch.device) for Sig in self.Sig_list]
             if self.method == 1:
                 likelihood = -ELL_TB_mvn_MH(m_list, S_list, y_list, X_processed, l_max=self.l_terms)
-                KL_div = KL_mvn_MH(m_list, S_list, mu_list, self.Sig_list)
+                KL_div = KL_mvn_MH(m_list, S_list, mu_list, Sig_list)
             else:
                 likelihood = -ELL_MC_mvn_MH(m_list, S_list, y_list, X_processed, n_samples=self.n_samples)
                 KL_div = KL_mvn_MH(m_list, S_list, mu_list, self.Sig_list)

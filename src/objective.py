@@ -103,7 +103,7 @@ def ELL_TB_mvn(m, S, y, X, l_max = 10.0):
 
     S = torch.sqrt(S)
 
-    l = torch.arange(1.0, l_max*2, 1.0, requires_grad=False, dtype=torch.float64)
+    l = torch.arange(1.0, l_max*2, 1.0, requires_grad=False, dtype=torch.float64).to(M.device)
 
     M = M.unsqueeze(1)
     S = S.unsqueeze(1)

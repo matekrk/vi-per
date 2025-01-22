@@ -8,15 +8,45 @@ import warnings
 from sklearn.exceptions import UndefinedMetricWarning
 warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
 
-def evaluate(model, X_test, y_test, data_size, K, device, prefix = "", threshold = 0.5, verbose = False):
-    # Get predictions
-    with torch.no_grad():
-        X_test = X_test.to(device)
-        y_test = y_test.to(device)
-        preds = model.predict(X_test)
-        loss = model.test_loss(X_test, y_test, data_size, verbose=verbose)
+def evaluate(model, test_dataloader, X_test, y_test, data_size, K, device, prefix = "", threshold = 0.5, verbose = False):
+    model.eval()
+    preds = []
+    y_tests = []
+    total_loss = 0.0
+    total_likelihoods = []
+    total_sum_likelihood = 0.0
+    total_likelihoods_mc = []
+    total_sum_likelihood_mc = 0.0
 
-    # Binarize predictions using a threshold (e.g., 0.5)
+    with torch.no_grad():
+        for X_batch, y_batch in test_dataloader:
+            X_batch = X_batch.to(device)
+            y_batch = y_batch.to(device)
+            batch_preds = model.predict(X_batch)
+            preds.append(batch_preds)
+            y_tests.append(y_batch)
+            total_loss += model.test_loss(X_batch, y_batch, data_size, verbose=verbose).item()
+            likelihoods = model.compute_likelihood(X_batch, y_batch)
+            sum_likelihood = sum(likelihoods).item()
+            likelihoods_mc = model.compute_likelihood(X_batch, y_batch, mc=True)
+            sum_likelihood_mc = sum(likelihoods_mc).item()
+            total_likelihoods.append(likelihoods)
+            total_sum_likelihood += sum_likelihood
+            total_likelihoods_mc.append(likelihoods_mc)
+            total_sum_likelihood_mc += sum_likelihood_mc
+
+    preds = torch.cat(preds, dim=0)
+    y_test = torch.cat(y_tests, dim=0)
+    loss = total_loss / len(test_dataloader)
+    total_likelihoods = torch.cat(total_likelihoods).mean(dim=0)
+    min_likelihood = total_likelihoods.min().item()
+    total_likelihoods = total_likelihoods.tolist()
+    total_sum_likelihood = total_sum_likelihood / len(test_dataloader)
+    total_likelihoods_mc = torch.cat(total_likelihoods_mc).mean(dim=0)
+    min_likelihood_mc = total_likelihoods_mc.min().item()
+    total_likelihoods_mc = total_likelihoods_mc.tolist()
+    total_sum_likelihood_mc = total_sum_likelihood_mc / len(test_dataloader)
+
     y_pred = (preds >= threshold).double()
     assert y_pred.shape == y_test.shape, f"y_pred.shape={y_pred.shape} != y_test.shape={y_test.shape}"
 
@@ -28,12 +58,18 @@ def evaluate(model, X_test, y_test, data_size, K, device, prefix = "", threshold
         "accuracy": [],
         "precision": [],
         "recall": [],
-        "loss": loss.item(),
+        "likelihood": [],
+        "likelihood_mc": [],
+        "loss": loss,
         "ece": []
     }
 
+
+    print("------------------------------------")
     # Compute evaluation metrics (accuracy and F1-score) per label
     for k in range(K):
+        metrics["likelihood"].append(likelihoods[k].item())
+        metrics["likelihood_mc"].append(likelihoods_mc[k].item())
         acc = accuracy_score(y_test[:, k].flatten().int().cpu().numpy(), y_pred[:, k].int().flatten().cpu().numpy())
         precision = precision_score(y_test[:, k].cpu().numpy(), y_pred[:, k].cpu().numpy())
         recall = recall_score(y_test[:, k].cpu().numpy(), y_pred[:, k].cpu().numpy())
@@ -52,7 +88,8 @@ def evaluate(model, X_test, y_test, data_size, K, device, prefix = "", threshold
         metrics["ece"].append(per_class_ece)
         ece_avg = torch.tensor(per_class_ece).mean().item()
         if verbose:
-            print(f"{prefix} : Label {k}: Loss = {loss:.2f}, ECE = {ece_avg:.2f}, Accuracy = {acc:.2f}, Precision = {precision:.2f}, Recall = {recall:.2f}, F1-score = {f1:.2f}")
+            print(f"{prefix} : Label {k}: Loss = {loss:.2f}, SumLikelihood = {total_sum_likelihood:.2f}, MinLikelihood = {min_likelihood:.2f}, SumLikelihoodMC = {total_sum_likelihood_mc:.2f}, MinLikelihoodMC = {min_likelihood_mc:.2f}, ECE = {ece_avg:.2f}, Accuracy = {acc:.2f}, Precision = {precision:.2f}, Recall = {recall:.2f}, F1-score = {f1:.2f}")
+    print("------------------------------------")
 
     return metrics
 
@@ -155,6 +192,8 @@ def log(wandb_log, metrics = None, time = None, time_metric=None, specific_key =
         assert time is not None, "Epoch must be provided"
         wandb.log({f"{prefix}/loss": metrics["loss"], f"{prefix}/epoch": time})
         for k in range(len(metrics["f1"])): # K labels
+            wandb.log({f"{prefix}/{k}/likelihood": metrics["likelihood"][k]})
+            wandb.log({f"{prefix}/{k}/likelihood_mc": metrics["likelihood_mc"][k]})
             wandb.log({f"{prefix}/{k}/f1": metrics["f1"][k]})
             wandb.log({f"{prefix}/{k}/accuracy": metrics["accuracy"][k]})
             wandb.log({f"{prefix}/{k}/precision": metrics["precision"][k]})

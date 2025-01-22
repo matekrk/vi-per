@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import torch
 
 from backbone import get_backbone
-from data import prepare_dataloader, prepare_data_shapes
+from data import prepare_dataloader, prepare_data_shapes, prepare_data_shapes_ood
 from model import create_model
 from utils import compute_confusion_matrix, create_optimizer_scheduler, evaluate, wandb_init, log
 
@@ -17,6 +17,7 @@ default_config = {
     "intercept": False,
     "model_type": None, # cannot be None, fill it
     "beta": 0.0,
+    "pred_threshold": 0.5,
     "f1_thres": 0.55,
     "method": None,
     "l_max": None,
@@ -56,14 +57,16 @@ default_config = {
     "batch_size": 32,
     "data_channels": 3,
     "data_size": 64,
-    "N": 1024,
+    "N": 4096,
+    "N_ood": 3072,
     "N_test_ratio": 0.2,
     "coloured_background": False,
     "coloured_figues": False,
     "no_overlap": False,
     "bias_classes": [0.5, 0.5, 0.0, 0.0, 0.0, 0.0],
     "bias_classes_ood": [0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
-    "simplicity": 3,
+    "simplicity": 1,
+    "simplicity_ood": 6,
     "main_dir": "/shared/sets/datasets/vision/artificial_shapes",
     # "shapes": ['disk', 'square', 'triangle', 'star', 'hexagon', 'pentagon'],
     "wandb": False,
@@ -88,8 +91,11 @@ def train(cfg):
     data_size = X.shape[0]
     data_loader = prepare_dataloader(X, y, batch_size=cfg.batch_size)
 
-    _, _, X_ood, y_ood = prepare_data_shapes(cfg)
+    X_ood, y_ood, _, _ = prepare_data_shapes_ood(cfg)
     ood = prepare_dataloader(X_ood, y_ood, batch_size=cfg.batch_size)
+
+    test_data_loder = prepare_dataloader(X_test, y_test, batch_size=cfg.batch_size)
+    ood_data_loader = prepare_dataloader(X_ood, y_ood, batch_size=cfg.batch_size)
 
     backbone = get_backbone(cfg)
 
@@ -97,13 +103,11 @@ def train(cfg):
 
     model_init = copy.deepcopy(model)
 
-    # evaluate(model, X_test, y_test, data_size, cfg.K)
     model.backbone.train()
-    # model.m_list.train() #FIXME: handle this
 
-    evaluate(model, X, y, data_size, cfg.K, device, prefix="train")
-    evaluate(model, X_test, y_test, data_size, cfg.K, device, prefix="test")
-    evaluate(model, X_ood, y_ood, data_size, cfg.K, device, prefix="ood")
+    evaluate(model, data_loader, X, y, data_size, cfg.K, device, prefix="train", threshold=cfg.pred_threshold)
+    evaluate(model, test_data_loder, X_test, y_test, data_size, cfg.K, device, prefix="test", threshold=cfg.pred_threshold)
+    evaluate(model, ood_data_loader, X_ood, y_ood, data_size, cfg.K, device, prefix="ood", threshold=cfg.pred_threshold)
 
     optimizer, scheduler = create_optimizer_scheduler(cfg, model)
 
@@ -115,13 +119,26 @@ def train(cfg):
         "running_loss": [],
         "train/running_loss_mean": [],
         "train_loss": [],
+        "train_likelihood": [],
+        "train_likelihood_mc": [],
+        "train/mean_likelihood": [],
+        "train/min_likelihood": [],
+        "train/mean_likelihood_mc": [],
+        "train/min_likelihood_mc": [],
         "train_f1": [],
         "train/mean_f1": [],
         "train_accuracy": [],
         "train_precision": [],
         "train_recall": [],
         "train_ece": [],
+        "train/mean_ece": [],
         "test_loss": [],
+        "test_likelihood": [],
+        "test_likelihood_mc": [],
+        "test/mean_likelihood": [],
+        "test/min_likelihood": [],
+        "test/mean_likelihood_mc": [],
+        "test/min_likelihood_mc": [],
         "test_f1": [],
         "test/mean_f1": [],
         "test_accuracy": [],
@@ -130,13 +147,22 @@ def train(cfg):
         "test_ece": [],
         "test/mean_ece": [],
         "ood_loss": [],
+        "ood_likelihood": [],
+        "ood_likelihood_mc": [],
+        "ood/mean_likelihood": [],
+        "ood/min_likelihood": [],
+        "ood/mean_likelihood_mc": [],
+        "ood/min_likelihood_mc": [],
         "ood_f1": [],
         "ood/mean_f1": [],
         "ood_accuracy": [],
         "ood_precision": [],
         "ood_recall": [],
         "ood_ece": [],
-        "ood/mean_ece": []
+        "ood/mean_ece": [],
+        "vi/prior_mu": [],
+        "vi/u_sig": [],
+        "vi/sig": []
     }
     epochs_eval = []
 
@@ -160,13 +186,38 @@ def train(cfg):
         metrics["train/running_loss_mean"].append(epoch_loss / len(data_loader))
         log(cfg.wandb, metrics, epoch, specific_key = "train/running_loss_mean")
 
+        if cfg.model_type == "logisticvi" and (cfg.prior_mean_learnable or cfg.prior_scale_learnable):
+            metrics["vi/prior_mu"].append(model.prior_mu.item())
+            metrics["vi/u_sig"].append(model.u_sig.item())
+            metrics["vi/sig"].append(model.prior_scale.item())
+            log(cfg.wandb, metrics, epoch, specific_key = "vi/prior_mu")
+            log(cfg.wandb, metrics, epoch, specific_key = "vi/u_sig")
+            log(cfg.wandb, metrics, epoch, specific_key = "vi/sig")
+
         if test_evaluate:
             epochs_eval.append(epoch)
-            train_metrics_eval = evaluate(model, X, y, data_size, cfg.K, device, prefix="train", verbose=verbose)
+            train_metrics_eval = evaluate(model, data_loader, X, y, data_size, cfg.K, device, prefix="train", threshold=cfg.pred_threshold, verbose=verbose)
             log(cfg.wandb, train_metrics_eval, epoch, evaluated=True, prefix="train")
-            test_metrics_eval = evaluate(model, X_test, y_test, data_size, cfg.K, device, prefix="test", verbose=verbose)
+            test_metrics_eval = evaluate(model, test_data_loder, X_test, y_test, data_size, cfg.K, device, prefix="test", threshold=cfg.pred_threshold, verbose=verbose)
             log(cfg.wandb, test_metrics_eval, epoch, evaluated=True, prefix="test")
             
+            metrics["train/mean_likelihood"].append(sum(train_metrics_eval["likelihood"]) / len(train_metrics_eval["likelihood"]))
+            log(cfg.wandb, metrics, epoch, specific_key = "train/mean_likelihood")
+            metrics["test/mean_likelihood"].append(sum(test_metrics_eval["likelihood"]) / len(test_metrics_eval["likelihood"]))
+            log(cfg.wandb, metrics, epoch, specific_key = "test/mean_likelihood")
+            metrics["train/mean_likelihood_mc"].append(sum(train_metrics_eval["likelihood_mc"]) / len(train_metrics_eval["likelihood_mc"]))
+            log(cfg.wandb, metrics, epoch, specific_key = "train/mean_likelihood_mc")
+            metrics["test/mean_likelihood_mc"].append(sum(test_metrics_eval["likelihood_mc"]) / len(test_metrics_eval["likelihood_mc"]))
+            log(cfg.wandb, metrics, epoch, specific_key = "test/mean_likelihood_mc")
+            metrics["train/min_likelihood"].append(min(train_metrics_eval["likelihood"]))
+            log(cfg.wandb, metrics, epoch, specific_key = "train/min_likelihood")
+            metrics["test/min_likelihood"].append(min(test_metrics_eval["likelihood"]))
+            log(cfg.wandb, metrics, epoch, specific_key = "test/min_likelihood")
+            metrics["train/min_likelihood_mc"].append(min(train_metrics_eval["likelihood_mc"]))
+            log(cfg.wandb, metrics, epoch, specific_key = "train/min_likelihood_mc")
+            metrics["test/min_likelihood_mc"].append(min(test_metrics_eval["likelihood_mc"]))
+            log(cfg.wandb, metrics, epoch, specific_key = "test/min_likelihood_mc")
+
             metrics["train/mean_f1"].append(sum(train_metrics_eval["f1"]) / len(train_metrics_eval["f1"]))
             log(cfg.wandb, metrics, epoch, specific_key = "train/mean_f1")
             metrics["test/mean_f1"].append(sum(test_metrics_eval["f1"]) / len(test_metrics_eval["f1"]))
@@ -187,8 +238,16 @@ def train(cfg):
                 preds = model.predict(X_test[0:cfg.n_test_data_pred].to(device))
                 print("true:", y_test[0:cfg.n_test_data_pred].detach().cpu().numpy(), "\npred:", preds.detach().cpu().numpy())
 
-            ood_metrics_eval = evaluate(model, X_ood, y_ood, data_size, cfg.K, device, prefix="ood", verbose=verbose)
+            ood_metrics_eval = evaluate(model, ood_data_loader, X_ood, y_ood, data_size, cfg.K, device, prefix="ood", threshold=cfg.pred_threshold, verbose=verbose)
             log(cfg.wandb, ood_metrics_eval, epoch, evaluated=True, prefix="ood")
+            metrics["ood/mean_likelihood"].append(sum(ood_metrics_eval["likelihood"]) / len(ood_metrics_eval["likelihood"]))
+            log(cfg.wandb, metrics, epoch, specific_key = "ood/mean_likelihood")
+            metrics["ood/mean_likelihood_mc"].append(sum(ood_metrics_eval["likelihood_mc"]) / len(ood_metrics_eval["likelihood_mc"]))
+            log(cfg.wandb, metrics, epoch, specific_key = "ood/mean_likelihood_mc")
+            metrics["ood/min_likelihood"].append(min(ood_metrics_eval["likelihood"]))
+            log(cfg.wandb, metrics, epoch, specific_key = "ood/min_likelihood")
+            metrics["ood/min_likelihood_mc"].append(min(ood_metrics_eval["likelihood_mc"]))
+            log(cfg.wandb, metrics, epoch, specific_key = "ood/min_likelihood_mc")
             metrics["ood/mean_f1"].append(sum(ood_metrics_eval["f1"]) / len(ood_metrics_eval["f1"]))
             log(cfg.wandb, metrics, epoch, specific_key = "ood/mean_f1")
             metrics["ood/mean_ece"].append(sum([sum(ece_list) for ece_list in ood_metrics_eval["ece"]]) / (len(ood_metrics_eval["ece"][0]) * len(ood_metrics_eval["ece"])))
@@ -280,6 +339,8 @@ if __name__ == "__main__":
     if cfg.wandb:
         wandb_init(cfg)
     metrics_summary = train(cfg)
+    # print("[End of training] Metrics summary:")
+    # print(metrics_summary)
     with open(os.path.join(cfg.path_to_results, cfg.name_exp, f"seed_{cfg.seed}", "metrics_summary.json"), 'w') as f:
         json.dump(metrics_summary, f, indent=4)
     print("Training done")

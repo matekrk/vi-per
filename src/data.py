@@ -57,6 +57,16 @@ def prepare_data_synthetic():
 
     return X, y, X_test, y_test
 
+def get_prependix(bias_classes):
+    classes = ['disk', 'square', 'triangle', 'star', 'hexagon', 'pentagon']
+    classes_symbols = ["o", "s", "^", "*", "H", "p"]
+    if bias_classes is None:
+        bias_classes = [1/(len(classes)) for _ in classes]
+        n_classes = len(classes)
+        relevant_classes = classes_symbols[:n_classes]
+    else:
+        relevant_classes = [classes_symbols[i] for i, b in enumerate(bias_classes) if b > 0]
+    return "".join([str(b) for b in relevant_classes])
 
 def get_appendix(coloured_background, coloured_figues, no_overlap):
     def get_bool_str(v):
@@ -71,17 +81,17 @@ def prepare_data_shapes(cfg):
         cfg = vars(cfg)
     size =  cfg.get("size", 64)
     N = cfg.get("N", 1024)
-    N_test_ratio = cfg.get("N_test_ratio", 0.2)
+    N_test_ratio = cfg.get("N_test_ratio", 0.75)
     N_test = int(N * N_test_ratio)
 
     coloured_background = cfg.get("coloured_background", False)
     coloured_figues = cfg.get("coloured_figues", False)
     no_overlap = cfg.get("no_overlap", False)
     bias_classes = cfg.get("bias_classes", [0.5, 0.5, 0.0, 0.0, 0.0, 0.0])
-    simplicity = cfg.get("simplicity", 3)
+    simplicity = cfg.get("simplicity", 1)
 
     main_dir = "/shared/sets/datasets/vision/artificial_shapes"
-    path_to_save = os.path.join(main_dir, f"size{size}_" + f"simplicity{simplicity}_" + f"len{N}_" + get_appendix(coloured_background, coloured_figues, no_overlap))
+    path_to_save = os.path.join(main_dir, f"classes{get_prependix(bias_classes)}_" + f"size{size}_" + f"simplicity{simplicity}_" + f"len{N}_" + get_appendix(coloured_background, coloured_figues, no_overlap))
     datasetdir = os.path.join(path_to_save, "images")
     datasettxt = os.path.join(path_to_save, "data.txt")
     labelstxt = os.path.join(path_to_save, "label.txt")
@@ -121,18 +131,16 @@ def prepare_data_shapes_ood(cfg):
     if not isinstance(cfg, dict):
         cfg = vars(cfg)
     size =  cfg.get("size", 64)
-    N = cfg.get("N", 1024)
-    N_test_ratio = cfg.get("N_test_ratio", 0.2)
-    N_test = int(N * N_test_ratio)
+    N_ood = cfg.get("N_ood", 1024)
 
     coloured_background = cfg.get("coloured_background", False)
     coloured_figues = cfg.get("coloured_figues", False)
     no_overlap = cfg.get("no_overlap", False)
     bias_classes_ood = cfg.get("bias_classes_ood", [0.0, 0.0, 1.0, 0.0, 0.0, 0.0])
-    simplicity = cfg.get("simplicity", 3)
+    simplicity = cfg.get("simplicity_ood", 6)
 
     main_dir = "/shared/sets/datasets/vision/artificial_shapes"
-    path_to_save = os.path.join(main_dir, f"size{size}_" + f"simplicity{simplicity}_" + f"len{N}_" + get_appendix(coloured_background, coloured_figues, no_overlap))
+    path_to_save = os.path.join(main_dir, f"classes{get_prependix(bias_classes_ood)}_" + f"size{size}_" + f"simplicity{simplicity}_" + f"len{N_ood}_" + get_appendix(coloured_background, coloured_figues, no_overlap))
     datasetdir = os.path.join(path_to_save, "images_ood")
     datasettxt = os.path.join(path_to_save, "data_ood.txt")
     labelstxt = os.path.join(path_to_save, "label_ood.txt")
@@ -142,7 +150,7 @@ def prepare_data_shapes_ood(cfg):
     if os.path.isdir(path_to_save):
         dataset, labels = load_artificial_shapes_dataset(datasetdir, datasettxt, labelstxt, targettxt)
     else:
-        dataset, labels = create_artificialshapes_dataset(N_test, size, datasetdir, datasettxt, labelstxt, targettxt, no_overlap, coloured_figues, coloured_background, bias_classes_ood, simplicity)
+        dataset, labels = create_artificialshapes_dataset(N_ood, size, datasetdir, datasettxt, labelstxt, targettxt, no_overlap, coloured_figues, coloured_background, bias_classes_ood, simplicity)
 
     shapes = ['disk', 'square', 'triangle', 'star', 'hexagon', 'pentagon']
 
@@ -160,13 +168,10 @@ def prepare_data_shapes_ood(cfg):
     X = dataset
     X = X * (1/255)
 
-    X_test = torch.tensor(X[-N_test:]).permute(0, 3, 1, 2).double()
-    y_test = torch.tensor(y[-N_test:]).double()
-    X = torch.tensor(X[:N_test]).permute(0, 3, 1, 2).double()
-    y = torch.tensor(y[:N_test]).double()
+    X = torch.tensor(X[:N_ood]).permute(0, 3, 1, 2).double()
+    y = torch.tensor(y[:N_ood]).double()
 
-    # print(N, K, X.shape, y.shape, X_test.shape, y_test.shape)
-    return X, y, X_test, y_test
+    return X, y, None, None
 
 
 def prepare_dataloader(X, y, batch_size = 64):

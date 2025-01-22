@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from objective import ELL_MC_MH, ELL_TB_MH, KL_MH, ELL_MC_mvn_MH, ELL_TB_mvn_MH, KL_mvn_MH
+from objective import ELL_MC_MH, ELL_TB_MH, KL_MH, ELL_MC_mvn_MH, ELL_TB_mvn_MH, KL_mvn_MH, ELL_MC, ELL_TB, ELL_MC_mvn, ELL_TB_mvn
 
 ##### SOFTMAX
 import sys
@@ -112,9 +112,29 @@ class LogisticVI(LLModel):
         Backbone network to transform input features.
     """
 
-    def __init__(self, p, K, method=0, beta=1.0, intercept=False,
-                 mu=None, sig=None, Sig=None, m_init=None, s_init=None, 
-                 prior_scale=1.0, posterior_mean_init_scale=1.0, posterior_var_init_add=0.0,
+    @property
+    def mu_list(self):
+        return self.prior_mu.expand(self.K, self.p)
+        # return torch.full((self.K, self.p), self.prior_mu.item(), dtype=torch.double, requires_grad=self.prior_mu.requires_grad)
+
+    @property
+    def prior_scale(self):
+        return torch.exp(self.u_sig)
+
+    @property
+    def sig_list(self):
+        return self.prior_scale.expand(self.K, self.p)
+        # return torch.full((self.K, self.p), self.prior_scale.item(), dtype=torch.double, requires_grad=self.u_sig.requires_grad)
+
+    @property
+    def Sig_list(self):
+        ps = self.prior_scale
+        return [torch.eye(self.p, dtype=torch.double, device=ps.device) * ps for _ in range(self.K)]
+
+    def __init__(self, p, K, method=0, beta=1.0, intercept=False, # mu=None, sig=None, Sig=None, 
+                 m_init=None, s_init=None, 
+                 prior_mean_learnable=False, prior_scale=1.0, prior_scale_learnable=False,
+                 posterior_mean_init_scale=1.0, posterior_var_init_add=0.0,
                  l_max=12.0, adaptive_l=False, n_samples=500, backbone=None):
         p = super().__init__(p, K, beta=beta, intercept=intercept, backbone=backbone)
 
@@ -124,20 +144,9 @@ class LogisticVI(LLModel):
         self.n_samples = n_samples
 
         # Initialize prior parameters
-        if mu is None:
-            self.mu_list = [torch.zeros(p, dtype=torch.double) for _ in range(K)]
-        else:
-            self.mu_list = [mu[:, k] for k in range(K)]
+        self.prior_mu = nn.Parameter(torch.tensor(0.0, dtype=torch.double), requires_grad=prior_mean_learnable)
 
-        if sig is None:
-            self.sig_list = [torch.ones(p, dtype=torch.double) * prior_scale for _ in range(K)]
-        else:
-            self.sig_list = [sig[:, k] for k in range(K)]
-
-        if Sig is None:
-            self.Sig_list = [torch.eye(p, dtype=torch.double) * prior_scale for _ in range(K)]
-        else:
-            self.Sig_list = Sig  # List of K covariance matrices of shape (p, p)
+        self.u_sig = nn.Parameter(torch.log(torch.tensor(prior_scale, dtype=torch.double)), requires_grad=prior_scale_learnable)
 
         # Initialize variational parameters
         if m_init is None:
@@ -169,7 +178,7 @@ class LogisticVI(LLModel):
             u.requires_grad = True
 
         # Collect parameters for optimization
-        self.params = nn.ParameterList(list(self.m_list) + list(self.u_list))
+        self.params = nn.ParameterList([self.prior_mu, self.u_sig] + list(self.m_list) + list(self.u_list))
         if self.backbone is not None:
             self.params += list(self.backbone.parameters())
 
@@ -219,7 +228,7 @@ class LogisticVI(LLModel):
                 likelihood = -ELL_TB_MH(m_list, s_list, y_list, X_processed, l_max=self.l_terms)
                 KL_div = KL_MH(m_list, s_list, mu_list, sig_list)
             else:
-                likelihood = -ELL_MC_MH(m_list, s_list, y_list, X_processed, n_samples=self.n_samples)
+                likelihood = -ELL_MC_MH(m_list, s_list, y_list, X_processed.to(X_batch.device), n_samples=self.n_samples)
                 KL_div = KL_MH(m_list, s_list, mu_list, sig_list)
 
         elif self.method in [1, 5]:
@@ -250,6 +259,32 @@ class LogisticVI(LLModel):
         if verbose:
             print(f"ELBO={ELBO:.2f} mean_log_lik={mean_log_lik:.2f} mean_kl_div={mean_kl_div:.2f}")
         return ELBO
+
+    def compute_likelihood(self, X, y, mc = False, n_samples = 1000):
+        X_processed = self.process(X)
+        m_list = [m.to(X.device) for m in self.m_list]
+        y_list = [y[:, k] for k in range(self.K)]
+        if self.method in [0, 4]:
+            s_list = [torch.exp(u).to(X.device) for u in self.u_list]
+            if mc:
+                nlls = [ELL_MC(m, s, y, X_processed, n_samples=n_samples) for m, s, y in zip(m_list, s_list, y_list)]
+            else:
+                nlls = [ELL_TB(m, s, y, X_processed, l_max=self.l_terms) for m, s, y in zip(m_list, s_list, y_list)]
+        elif self.method in [1, 5]:
+            L_list = []
+            u_list = [u.to(X.device) for u in self.u_list]
+            for u in u_list:
+                L = torch.zeros(self.p, self.p, dtype=torch.double, device=X.device)
+                tril_indices = torch.tril_indices(self.p, self.p, 0).to(X.device)
+                L[tril_indices[0], tril_indices[1]] = u
+                L_list.append(L)
+
+            S_list = [L @ L.t() for L in L_list]
+            if mc:
+                nlls = [ELL_MC_mvn(m, S, y, X_processed, n_samples=n_samples) for m, S, y in zip(m_list, S_list, y.T)]
+            else:
+                nlls = [ELL_TB_mvn(m, S, y, X_processed, l_max=self.l_terms) for m, S, y in zip(m_list, S_list, y.T)]
+        return torch.tensor(nlls)
 
 
     def predict(self, X):
@@ -369,6 +404,28 @@ class LogisticPointwise(LLModel):
 
         preds = torch.cat(preds, dim=1)  # Shape: (n_samples, K)
         return preds
+
+    def compute_likelihood(self, X, y, mc = True, n_samples = 1000):
+        """
+        Compute the negative log likelihood of the data given the predictions.
+
+        Parameters:
+        ----------
+        preds : torch.Tensor
+            Predicted probabilities for each output. Shape (n_samples, K).
+        y : torch.Tensor
+            Target variables. Shape (n_samples, K).
+
+        Returns:
+        -------
+        nll : torch.Tensor
+            The computed negative log likelihood for each attribute. Shape (K).
+        """
+        # mc = True, n_samples = 1000 # dumb arguments
+        preds = self.predict(X)
+        loss = nn.BCELoss(reduction='none')
+        nll = torch.mean(loss(preds, y), dim=0)
+        return nll
 
 """## VBLL models"""
 

@@ -159,11 +159,15 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-# personal
+# VS Code
 .vscode/
+
+# personal
 wandb.txt
 data/
 slurms/
 results/
 cfgs/
-commands/
+cfgs_new/
+command
+command_new

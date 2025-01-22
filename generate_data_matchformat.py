@@ -23,14 +23,16 @@ def create_artificialshapes_dataset(N, img_size, datadir, datatxt, labeltxt, tar
             case 0:
                 return [0.1, 0.3, 0.25, 0.1, 0.05, 0.05, 0.05, 0.025, 0.025, 0.025, 0.025]
             case 1:
-                return [0.34, 0.33, 0.33]
+                return [0.25, 0.5, 0.25]
             case 2:
                 return [0.2, 0.5, 0.2, 0.1]
             case 3:
                 return [0.5, 0.5]
             case 4:
-                return [0.0, 1.0]
+                return [0.33, 0.67]
             case 5:
+                return [0.0, 1.0]
+            case 6:
                 return [1.0]
     probs_number_figures = get_prob_figures(simplicity)
 
@@ -145,10 +147,6 @@ def create_artificialshapes_dataset(N, img_size, datadir, datatxt, labeltxt, tar
     data_file.close()
     label_file.close()
     target_file.close()
-
-    # tmp
-
-
     return np.array(dataset), labels
 
 def load_artificial_shapes_dataset(datadir, datatxt, labeltxt, targettxt):
@@ -177,28 +175,41 @@ def check_overlap(shape1, shape2):
 def main():
 
     size =  64
-    N = 10240
-    main_dir = f"../data/artificial_shapes/"
+    N = 4096
+    main_dir = f"/shared/sets/datasets/vision/artificial_shapes"
 
     coloured_background = False
-    coloured_figues = True
+    coloured_figues = False
     no_overlap = False
-    bias_classes = None
-    simplicity = 3
+    bias_classes = [0.5, 0.5, 0.0, 0.0, 0.0, 0.0]
+    simplicity = 1
+
+    def get_prependix(bias_classes):
+        classes = ['disk', 'square', 'triangle', 'star', 'hexagon', 'pentagon']
+        classes_symbols = ["o", "s", "^", "*", "H", "p"]
+        if bias_classes is None:
+            bias_classes = [1/(len(classes)) for _ in classes]
+            n_classes = len(classes)
+            relevant_classes = classes_symbols[:n_classes]
+        else:
+            relevant_classes = [classes_symbols[i] for i, b in enumerate(bias_classes) if b > 0]
+        return "".join([str(b) for b in relevant_classes])
+
 
     def get_appendix(coloured_background, coloured_figues, no_overlap):
         def get_bool_str(v):
             return "T" if v else "F"
         return f"cb{get_bool_str(coloured_background)}_cf{get_bool_str(coloured_figues)}_no{get_bool_str(no_overlap)}"
 
-    path_to_save = os.path.join(main_dir, f"size{size}_" + f"simplicity{simplicity}_" + f"len{N}_" + get_appendix(coloured_background, coloured_figues, no_overlap))
+    path_to_save = os.path.join(main_dir, f"classes{get_prependix(bias_classes)}_" + f"size{size}_" + f"simplicity{simplicity}_" + f"len{N}_" + get_appendix(coloured_background, coloured_figues, no_overlap))
 
     datasetdir = os.path.join(path_to_save, "images")
     datasettxt = os.path.join(path_to_save, "data.txt")
     labelstxt = os.path.join(path_to_save, "label.txt")
+    targettxt = os.path.join(path_to_save, "target.txt")
     print(f"Your data path will be: {path_to_save}")
 
-    dataset, labels = create_artificialshapes_dataset(N, size, datasetdir, datasettxt, labelstxt, no_overlap, coloured_figues, coloured_background, bias_classes, simplicity)
+    dataset, labels = create_artificialshapes_dataset(N, size, datasetdir, datasettxt, targettxt, labelstxt, no_overlap, coloured_figues, coloured_background, bias_classes, simplicity)
     
     # for inspection
     # datasetnpy = os.path.join(path_to_save, "data.npy")

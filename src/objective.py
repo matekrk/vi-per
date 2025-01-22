@@ -63,6 +63,10 @@ def ELL_TB(m, s, y, X, l_max = 10.0, XX=None):
 
     S = torch.sqrt(S)
 
+    if torch.any(S < 1e-10):
+        print("Warning: Very small S values detected - clamp to 1e-10")
+        S = torch.clamp(S, min=1e-10)
+
     l = torch.arange(1.0, l_max*2, 1.0, requires_grad=False, dtype=torch.float64).to(M.device)
 
     M = M.unsqueeze(1)
@@ -84,8 +88,6 @@ def ELL_TB(m, s, y, X, l_max = 10.0, XX=None):
 
     return res
 
-
-
 def ELL_TB_mvn(m, S, y, X, l_max = 10.0):
     """
     Compute the expected negative log-likelihood
@@ -102,6 +104,10 @@ def ELL_TB_mvn(m, S, y, X, l_max = 10.0):
         S = torch.sum(X * (S @ X.t()).t(), dim=1)
 
     S = torch.sqrt(S)
+
+    if torch.any(S < 1e-10):
+        print("Warning: Very small S values detected - clamp to 1e-10")
+        S = torch.clamp(S, min=1e-10)
 
     l = torch.arange(1.0, l_max*2, 1.0, requires_grad=False, dtype=torch.float64).to(M.device)
 

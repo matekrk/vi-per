@@ -73,6 +73,11 @@ def get_appendix(coloured_background, coloured_figues, no_overlap):
         return "T" if v else "F"
     return f"cb{get_bool_str(coloured_background)}_cf{get_bool_str(coloured_figues)}_no{get_bool_str(no_overlap)}"
 
+def get_prependix_dependencies(ood = False):
+    if ood:
+        return "dependencies/dependenciesOOD"
+    return "dependencies/dependenciesDEF"
+
 def create_binary_matrix(indices, num_cols):
     return np.array([[1 if j in row else 0 for j in range(num_cols)] for row in indices])
 
@@ -91,7 +96,8 @@ def prepare_data_shapes(cfg):
     simplicity = cfg.get("simplicity", 1)
 
     main_dir = "/shared/sets/datasets/vision/artificial_shapes"
-    path_to_save = os.path.join(main_dir, f"classes{get_prependix(bias_classes)}_" + f"size{size}_" + f"simplicity{simplicity}_" + f"len{N}_" + get_appendix(coloured_background, coloured_figues, no_overlap))
+    # path_to_save = os.path.join(main_dir, f"classes{get_prependix(bias_classes)}_" + f"size{size}_" + f"simplicity{simplicity}_" + f"len{N}_" + get_appendix(coloured_background, coloured_figues, no_overlap))
+    path_to_save = os.path.join(main_dir, f"{get_prependix_dependencies(ood=False)}_" + f"size{size}_" + f"len{N}_" + get_appendix(coloured_background, coloured_figues, no_overlap))
     datasetdir = os.path.join(path_to_save, "images")
     datasettxt = os.path.join(path_to_save, "data.txt")
     labelstxt = os.path.join(path_to_save, "label.txt")
@@ -140,11 +146,12 @@ def prepare_data_shapes_ood(cfg):
     simplicity = cfg.get("simplicity_ood", 6)
 
     main_dir = "/shared/sets/datasets/vision/artificial_shapes"
-    path_to_save = os.path.join(main_dir, f"classes{get_prependix(bias_classes_ood)}_" + f"size{size}_" + f"simplicity{simplicity}_" + f"len{N_ood}_" + get_appendix(coloured_background, coloured_figues, no_overlap))
+    # path_to_save = os.path.join(main_dir, f"classes{get_prependix(bias_classes_ood)}_" + f"size{size}_" + f"simplicity{simplicity}_" + f"len{N_ood}_" + get_appendix(coloured_background, coloured_figues, no_overlap))
+    path_to_save = os.path.join(main_dir, f"{get_prependix_dependencies(ood=True)}_" + f"size{size}_" + f"len{N_ood}_" + get_appendix(coloured_background, coloured_figues, no_overlap))
     datasetdir = os.path.join(path_to_save, "images_ood")
-    datasettxt = os.path.join(path_to_save, "data_ood.txt")
-    labelstxt = os.path.join(path_to_save, "label_ood.txt")
-    targettxt = os.path.join(path_to_save, "target_ood.txt")
+    datasettxt = os.path.join(path_to_save, "data.txt")
+    labelstxt = os.path.join(path_to_save, "label.txt")
+    targettxt = os.path.join(path_to_save, "target.txt")
     print(f"Your data path will be: {path_to_save}")
 
     if os.path.isdir(path_to_save):

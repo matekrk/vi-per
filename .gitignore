@@ -169,5 +169,7 @@ slurms/
 results/
 cfgs/
 cfgs_new/
+cfgs_dep/
 command
 command_new
+command_dep

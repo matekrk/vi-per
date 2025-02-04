@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from objective import ELL_MC_MH, ELL_TB_MH, KL_MH, ELL_MC_mvn_MH, ELL_TB_mvn_MH, KL_mvn_MH, ELL_MC, ELL_TB, ELL_MC_mvn, ELL_TB_mvn
+from objective import neg_ELL_MC_MH, neg_ELL_TB_MH, KL_MH, neg_ELL_MC_mvn_MH, neg_ELL_TB_mvn_MH, KL_mvn_MH, neg_ELL_MC, neg_ELL_TB, neg_ELL_MC_mvn, neg_ELL_TB_mvn
 
 ##### SOFTMAX
 import sys
@@ -51,18 +51,20 @@ class LLModel(nn.Module):
         else:
             X_processed = X_batch
 
+        X_processed = X_processed.to(torch.double)
+
         if self.intercept:
             X_processed = torch.cat((torch.ones(X_processed.size()[0], 1, device=X_processed.device), X_processed), 1)
         return X_processed
 
     def train_loss(self, X_batch, y_batch, data_size=None, verbose=False):
-        raise ValueError("[LLModel] train_loss not implemented")
+        raise NotImplementedError("[LLModel] train_loss not implemented")
     
     def test_loss(self, X_batch, y_batch, data_size=None, verbose=False):
-        raise ValueError("[LLModel] test_loss not implemented")
+        raise NotImplementedError("[LLModel] test_loss not implemented")
 
     def predict(self, X):
-        raise ValueError("[LLModel] predict not implemented")
+        raise NotImplementedError("[LLModel] predict not implemented")
     
     def forward(self, X):
         self.predict(X)
@@ -225,10 +227,10 @@ class LogisticVI(LLModel):
             sig_list = [sig.to(X_batch.device) for sig in self.sig_list]
 
             if self.method == 0:
-                likelihood = -ELL_TB_MH(m_list, s_list, y_list, X_processed, l_max=self.l_terms)
+                likelihood = -neg_ELL_TB_MH(m_list, s_list, y_list, X_processed, l_max=self.l_terms)
                 KL_div = KL_MH(m_list, s_list, mu_list, sig_list)
             else:
-                likelihood = -ELL_MC_MH(m_list, s_list, y_list, X_processed.to(X_batch.device), n_samples=self.n_samples)
+                likelihood = -neg_ELL_MC_MH(m_list, s_list, y_list, X_processed.to(X_batch.device), n_samples=self.n_samples)
                 KL_div = KL_MH(m_list, s_list, mu_list, sig_list)
 
         elif self.method in [1, 5]:
@@ -243,10 +245,10 @@ class LogisticVI(LLModel):
             S_list = [L @ L.t() for L in L_list]
             Sig_list = [Sig.to(X_batch.device) for Sig in self.Sig_list]
             if self.method == 1:
-                likelihood = -ELL_TB_mvn_MH(m_list, S_list, y_list, X_processed, l_max=self.l_terms)
+                likelihood = -neg_ELL_TB_mvn_MH(m_list, S_list, y_list, X_processed, l_max=self.l_terms)
                 KL_div = KL_mvn_MH(m_list, S_list, mu_list, Sig_list)
             else:
-                likelihood = -ELL_MC_mvn_MH(m_list, S_list, y_list, X_processed, n_samples=self.n_samples)
+                likelihood = -neg_ELL_MC_mvn_MH(m_list, S_list, y_list, X_processed, n_samples=self.n_samples)
                 KL_div = KL_mvn_MH(m_list, S_list, mu_list, self.Sig_list)
 
         else:
@@ -267,9 +269,9 @@ class LogisticVI(LLModel):
         if self.method in [0, 4]:
             s_list = [torch.exp(u).to(X.device) for u in self.u_list]
             if mc:
-                nlls = [ELL_MC(m, s, y, X_processed, n_samples=n_samples) for m, s, y in zip(m_list, s_list, y_list)]
+                nlls = [neg_ELL_MC(m, s, y, X_processed, n_samples=n_samples) for m, s, y in zip(m_list, s_list, y_list)]
             else:
-                nlls = [ELL_TB(m, s, y, X_processed, l_max=self.l_terms) for m, s, y in zip(m_list, s_list, y_list)]
+                nlls = [neg_ELL_TB(m, s, y, X_processed, l_max=self.l_terms) for m, s, y in zip(m_list, s_list, y_list)]
         elif self.method in [1, 5]:
             L_list = []
             u_list = [u.to(X.device) for u in self.u_list]
@@ -281,9 +283,9 @@ class LogisticVI(LLModel):
 
             S_list = [L @ L.t() for L in L_list]
             if mc:
-                nlls = [ELL_MC_mvn(m, S, y, X_processed, n_samples=n_samples) for m, S, y in zip(m_list, S_list, y.T)]
+                nlls = [neg_ELL_MC_mvn(m, S, y, X_processed, n_samples=n_samples) for m, S, y in zip(m_list, S_list, y.T)]
             else:
-                nlls = [ELL_TB_mvn(m, S, y, X_processed, l_max=self.l_terms) for m, S, y in zip(m_list, S_list, y.T)]
+                nlls = [neg_ELL_TB_mvn(m, S, y, X_processed, l_max=self.l_terms) for m, S, y in zip(m_list, S_list, y.T)]
         return torch.tensor(nlls)
 
 
@@ -327,19 +329,13 @@ class LogisticPointwise(LLModel):
         if Sig is None:
             self.Sig_list = [torch.eye(p, dtype=torch.double) for _ in range(K)]
         else:
-            self.Sig_list = Sig  # List of K covariance matrices of shape (p, p)
+            self.Sig_list = Sig
 
-        # Initialize variational parameters
         if m_init is None:
-            self.m_list = [torch.randn(p, dtype=torch.double) for _ in range(K)]
+            self.m_list = [nn.Parameter(torch.randn(p, dtype=torch.double)) for _ in range(K)]
         else:
-            self.m_list = [m_init[:, k] for k in range(K)]
+            self.m_list = [nn.Parameter(m_init[:, k]) for k in range(K)]
 
-        # Set requires_grad=True for variational parameters
-        for m in self.m_list:
-            m.requires_grad = True
-
-        # Collect parameters for optimization
         self.params = nn.ParameterList(self.m_list)
         if self.backbone is not None:
             self.params += list(self.backbone.parameters())
@@ -365,19 +361,19 @@ class LogisticPointwise(LLModel):
         assert preds.shape == y_batch.shape, f"preds.shape={preds.shape} != y_batch.shape={y_batch.shape}"
         loss = nn.BCELoss(reduction='mean')
         mean_bce = loss(preds, y_batch)
-        mean_reg = self.regularization() / data_size
+
+        beta = other_beta or self.beta
+        mean_reg = self.regularization() / data_size if beta else 0.0
 
         if verbose:
             print(f"mean_bce_loss={mean_bce:.2f}  mean_reg={mean_reg:.2f}")
-
-        beta = other_beta or self.beta
         return mean_bce + beta * mean_reg
 
     def regularization(self):
         log_prob = 0.
         for m, prior_mu, prior_Sig in zip(self.m_list, self.mu_list, self.Sig_list):
             # simple prior distribution
-            d = torch.distributions.MultivariateNormal(loc=prior_mu, covariance_matrix=prior_Sig)
+            d = torch.distributions.MultivariateNormal(loc=prior_mu.to(m.device), covariance_matrix=prior_Sig.to(m.device))
             log_prob += d.log_prob(m)
         return -log_prob
 
@@ -415,15 +411,17 @@ class LogisticPointwise(LLModel):
             Predicted probabilities for each output. Shape (n_samples, K).
         y : torch.Tensor
             Target variables. Shape (n_samples, K).
+        mc, n_samples : bool, int (optional) Dumb arguments
 
         Returns:
         -------
         nll : torch.Tensor
             The computed negative log likelihood for each attribute. Shape (K).
         """
-        # mc = True, n_samples = 1000 # dumb arguments
         preds = self.predict(X)
         loss = nn.BCELoss(reduction='none')
+        # likelihood = torch.exp(-loss(preds, y))
+        # mean_likelihood = torch.mean(likelihood, dim=0)
         nll = torch.mean(loss(preds, y), dim=0)
         return nll
 
@@ -532,6 +530,15 @@ class SoftmaxVBLL(LLModel):
 
         preds = torch.cat(preds, dim=1)  # Shape: (n_samples, K)
         return preds
+
+    def compute_likelihood(self, X, y, mc = False, n_samples = 1000):
+        #TODO: VBLL
+        X_processed = self.process(X)
+        nlls = []
+        for head, y in zip(self.heads, y.T):
+            nll = head(X_processed).compute_likelihood(y)
+            nlls.append(nll)
+        return torch.stack(nlls)
 
 class SoftmaxPointwise(LLModel):
 

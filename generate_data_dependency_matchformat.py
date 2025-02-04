@@ -195,7 +195,7 @@ def check_overlap(shape1, shape2):
 def main():
 
     size =  64
-    N = 10000 # 10000 7500
+    N = 200 # 7750 # 8500 # # 10000 7500
     M = 4 # 4 [4]
     main_dir = f"/shared/sets/datasets/vision/artificial_shapes/dependencies"
 

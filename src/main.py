@@ -7,75 +7,14 @@ import matplotlib.pyplot as plt
 import torch
 
 from backbone import get_backbone
-from data import prepare_dataloader, prepare_data_shapes, prepare_data_shapes_ood
+from data import prepare_dataset, prepare_dataloader, \
+    prepare_data_shapes, prepare_data_shapes_ood, \
+    prepare_data_pascal_voc_05, prepare_data_pascal_voc_12, \
+    prepare_loader_pascal_voc_05, prepare_loader_pascal_voc_12
 from model import create_model
-from utils import compute_confusion_matrix, create_optimizer_scheduler, evaluate, wandb_init, log
+from utils import compute_confusion_matrix, create_optimizer_scheduler, empty_metrics, default_config, evaluate, wandb_init, log
 
-default_config = {
-    "p": 64,
-    "K": 6,
-    "intercept": False,
-    "model_type": None, # cannot be None, fill it
-    "beta": 0.0,
-    "pred_threshold": 0.5,
-    "f1_thres": 0.55,
-    "method": None,
-    "l_max": None,
-    "n_samples": None,
-    "prior_scale": None,
-    "posterior_mean_init_scale": 1.0,
-    "posterior_var_init_add": 0.0,
-    "VBLL_PATH": None,
-    "VBLL_TYPE": None,
-    "VBLL_SOFTMAX_BOUND": None,
-    "VBLL_RETURN_EMPIRICAL": None,
-    "VBLL_RETURN_OOD": None,
-    "VBLL_PRIOR_SCALE": None,
-    "VBLL_WIDTH_SCALE": None,
-    "VBLL_WUMEAN_SCALE": None,
-    "VBLL_WULOGDIAG_SCALE": None,
-    "VBLL_WUOFFDIAG_SCALE": None,
-    "VBLL_NOISE_LABEL": None,
-    "VBLL_PARAMETRIZATION": None,
-    "VBLL_WISHART_SCALE": None,
-    "optimizer": "adam",
-    "lr": 0.001,
-    "lr_mult_w": 1.0,
-    "lr_mult_b": 1.0,
-    "gamma": 1.0,
-    "lr_decay_in_epoch": 100,
-    "wd": 0.0,
-    "last_layer_wd": None,
-    "no_wd_last": False,
-    "n_epochs": 500,
-    "evaluate_freq": 10,
-    "verbose_freq": 50,
-    "save_best": True,
-    "n_test_data_pred": 5,
-    "path_to_results": "./results",
-    "name_exp": "shapes",
-    "batch_size": 32,
-    "data_channels": 3,
-    "data_size": 64,
-    "N": 4096,
-    "N_ood": 3072,
-    "N_test_ratio": 0.2,
-    "coloured_background": False,
-    "coloured_figues": False,
-    "no_overlap": False,
-    "bias_classes": [0.5, 0.5, 0.0, 0.0, 0.0, 0.0],
-    "bias_classes_ood": [0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
-    "simplicity": 1,
-    "simplicity_ood": 6,
-    "main_dir": "/shared/sets/datasets/vision/artificial_shapes",
-    # "shapes": ['disk', 'square', 'triangle', 'star', 'hexagon', 'pentagon'],
-    "wandb": False,
-    "wandb_user_file": "wandb.txt",
-    "wandb_run_name": "shapes",
-    "wandb_tags": ["shapes"],
-    "wandb_offline": False,
-    "seed": 8
-}
+default_config = default_config()
 
 def train(cfg):
 
@@ -87,15 +26,45 @@ def train(cfg):
         device = torch.device("cpu") 
         print("Training on CPU")
 
-    X, y, X_test, y_test = prepare_data_shapes(cfg)
-    data_size = X.shape[0]
-    data_loader = prepare_dataloader(X, y, batch_size=cfg.batch_size)
+    if cfg.data_type == "shapes":
+        X, y, X_test, y_test = prepare_data_shapes(cfg)
+        data_size = X.shape[0]
+        dataset = prepare_dataset(X, y)
+        test_dataset = prepare_dataset(X_test, y_test)
+        data_loader = prepare_dataloader(dataset, batch_size=cfg.batch_size)
+        test_data_loder = prepare_dataloader(test_dataset, batch_size=cfg.batch_size)
+    
+    elif cfg.data_type == "pascal05":
+        dataset, dataset_test = prepare_data_pascal_voc_05(cfg)
+        data_size = len(dataset)
+        data_loader = prepare_loader_pascal_voc_05(dataset, cfg.batch_size)
+        X, y, X_test, y_test = None, None, None, None
+        test_data_loder = prepare_loader_pascal_voc_05(dataset_test, cfg.batch_size)
 
-    X_ood, y_ood, _, _ = prepare_data_shapes_ood(cfg)
-    ood = prepare_dataloader(X_ood, y_ood, batch_size=cfg.batch_size)
+    elif cfg.data_type == "pascal12":
+        dataset, dataset_test = prepare_data_pascal_voc_12(cfg)
+        data_size = len(dataset)
+        data_loader = prepare_loader_pascal_voc_12(dataset, cfg.batch_size)
+        X, y, X_test, y_test = None, None, None, None
+        test_data_loder = prepare_loader_pascal_voc_12(dataset_test, cfg.batch_size)
 
-    test_data_loder = prepare_dataloader(X_test, y_test, batch_size=cfg.batch_size)
-    ood_data_loader = prepare_dataloader(X_ood, y_ood, batch_size=cfg.batch_size)
+    if cfg.data_type_ood == "shapes_ood":
+        X_ood, y_ood, _, _ = prepare_data_shapes_ood(cfg)
+        dataset_ood = prepare_dataset(X_ood, y_ood)
+        ood_data_loader = prepare_dataloader(dataset_ood, batch_size=cfg.batch_size)
+
+    elif cfg.data_type_ood == "pascal05_ood":
+        # FIXME: prepare_data_pascal_voc_05_ood
+        _, dataset_ood = prepare_data_pascal_voc_05(cfg)
+        X_ood, y_ood = None, None
+        ood_data_loader = prepare_loader_pascal_voc_05(dataset_test, cfg.batch_size)
+
+    elif cfg.data_type_ood == "pascal12_ood":
+        dataset, dataset_test = prepare_data_pascal_voc_12(cfg)
+        data_size = len(dataset)
+        data_loader = prepare_loader_pascal_voc_12(dataset, cfg.batch_size)
+        X, y, X_test, y_test = None, None, None, None
+        test_data_loder = prepare_loader_pascal_voc_12(dataset_test, cfg.batch_size)
 
     backbone = get_backbone(cfg)
 
@@ -105,86 +74,58 @@ def train(cfg):
 
     model.backbone.train()
 
-    evaluate(model, data_loader, X, y, data_size, cfg.K, device, prefix="train", threshold=cfg.pred_threshold)
-    evaluate(model, test_data_loder, X_test, y_test, data_size, cfg.K, device, prefix="test", threshold=cfg.pred_threshold)
-    evaluate(model, ood_data_loader, X_ood, y_ood, data_size, cfg.K, device, prefix="ood", threshold=cfg.pred_threshold)
+    # init evaluation turned off
+    # evaluate(model, data_loader, X, y, data_size, cfg.K, device, prefix="train", threshold=cfg.pred_threshold)
+    # evaluate(model, test_data_loder, X_test, y_test, data_size, cfg.K, device, prefix="test", threshold=cfg.pred_threshold)
+    # evaluate(model, ood_data_loader, X_ood, y_ood, data_size, cfg.K, device, prefix="ood", threshold=cfg.pred_threshold)
 
     optimizer, scheduler = create_optimizer_scheduler(cfg, model)
+    num_learnable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Number of learnable parameters: {num_learnable_params}")
 
     model_best = None
     f1_thres = cfg.f1_thres
     log(cfg.wandb, time=0, particular_metric_key="test/best_mean_f1", particular_metric_value = -1.0)
 
-    metrics = {
-        "running_loss": [],
-        "train/running_loss_mean": [],
-        "train_loss": [],
-        "train_likelihood": [],
-        "train_likelihood_mc": [],
-        "train/mean_likelihood": [],
-        "train/min_likelihood": [],
-        "train/mean_likelihood_mc": [],
-        "train/min_likelihood_mc": [],
-        "train_f1": [],
-        "train/mean_f1": [],
-        "train_accuracy": [],
-        "train_precision": [],
-        "train_recall": [],
-        "train_ece": [],
-        "train/mean_ece": [],
-        "test_loss": [],
-        "test_likelihood": [],
-        "test_likelihood_mc": [],
-        "test/mean_likelihood": [],
-        "test/min_likelihood": [],
-        "test/mean_likelihood_mc": [],
-        "test/min_likelihood_mc": [],
-        "test_f1": [],
-        "test/mean_f1": [],
-        "test_accuracy": [],
-        "test_precision": [],
-        "test_recall": [],
-        "test_ece": [],
-        "test/mean_ece": [],
-        "ood_loss": [],
-        "ood_likelihood": [],
-        "ood_likelihood_mc": [],
-        "ood/mean_likelihood": [],
-        "ood/min_likelihood": [],
-        "ood/mean_likelihood_mc": [],
-        "ood/min_likelihood_mc": [],
-        "ood_f1": [],
-        "ood/mean_f1": [],
-        "ood_accuracy": [],
-        "ood_precision": [],
-        "ood_recall": [],
-        "ood_ece": [],
-        "ood/mean_ece": [],
-        "vi/prior_mu": [],
-        "vi/u_sig": [],
-        "vi/sig": []
-    }
+    metrics = empty_metrics()
     epochs_eval = []
 
     for epoch in range(cfg.n_epochs):
         verbose = cfg.verbose_freq and (epoch % cfg.verbose_freq == 0)
+        verbose_iter = False
         test_evaluate = (cfg.evaluate_freq and (epoch % cfg.evaluate_freq == 0)) or epoch == cfg.n_epochs - 1
 
+        grad_norm_accum = 0.0
+        param_norm_accum = 0.0
+
         epoch_loss = 0
+        model.train()
         for iter, (X_batch, y_batch) in enumerate(data_loader):
             X_batch, y_batch = X_batch.to(device), y_batch.to(device)
             optimizer.zero_grad()
-            loss = model.train_loss(X_batch, y_batch, data_size, verbose=verbose)
+            loss = model.train_loss(X_batch, y_batch, data_size, verbose=verbose_iter)
             loss.backward()
             epoch_loss += loss.item()
             metrics["running_loss"].append(loss.item())
             log(cfg.wandb, metrics, specific_key = "running_loss", time=epoch * len(data_loader) + iter, time_metric="iter")
+
+            if test_evaluate:
+                grad_norm = 0.0
+                param_norm = 0.0
+                for param in model.parameters():
+                    if param.grad is not None:
+                        grad_norm += param.grad.norm().item() ** 2
+                        param_norm += param.data.norm().item() ** 2
+                grad_norm_accum += grad_norm ** 0.5
+                param_norm_accum += param_norm ** 0.5
+
             optimizer.step()
             scheduler.step()
+
         if verbose:
             print(f"Epoch {epoch}, Loss: {epoch_loss:.4f}")
         metrics["train/running_loss_mean"].append(epoch_loss / len(data_loader))
-        log(cfg.wandb, metrics, epoch, specific_key = "train/running_loss_mean")
+        log(cfg.wandb, metrics, epoch, specific_key = "train/running_loss_mean")            
 
         if cfg.model_type == "logisticvi" and (cfg.prior_mean_learnable or cfg.prior_scale_learnable):
             metrics["vi/prior_mu"].append(model.prior_mu.item())
@@ -195,9 +136,21 @@ def train(cfg):
             log(cfg.wandb, metrics, epoch, specific_key = "vi/sig")
 
         if test_evaluate:
+
+            grad_norm_avg = grad_norm_accum / len(data_loader)
+            param_norm_avg = param_norm_accum / len(data_loader)
+
+            metrics["grad_norm"].append(grad_norm_avg)
+            log(cfg.wandb, metrics, epoch, specific_key="grad_norm")
+
+            metrics["param_norm"].append(param_norm_avg)
+            log(cfg.wandb, metrics, epoch, specific_key="param_norm")
+
             epochs_eval.append(epoch)
+            print("Train evaluation")
             train_metrics_eval = evaluate(model, data_loader, X, y, data_size, cfg.K, device, prefix="train", threshold=cfg.pred_threshold, verbose=verbose)
             log(cfg.wandb, train_metrics_eval, epoch, evaluated=True, prefix="train")
+            print("Test evaluation")
             test_metrics_eval = evaluate(model, test_data_loder, X_test, y_test, data_size, cfg.K, device, prefix="test", threshold=cfg.pred_threshold, verbose=verbose)
             log(cfg.wandb, test_metrics_eval, epoch, evaluated=True, prefix="test")
             
@@ -218,13 +171,18 @@ def train(cfg):
             metrics["test/min_likelihood_mc"].append(min(test_metrics_eval["likelihood_mc"]))
             log(cfg.wandb, metrics, epoch, specific_key = "test/min_likelihood_mc")
 
+            metrics["train/mean_ece"].append(sum(train_metrics_eval["ece"]) / len(train_metrics_eval["ece"]))
+            log(cfg.wandb, metrics, epoch, specific_key = "train/mean_ece")
+
             metrics["train/mean_f1"].append(sum(train_metrics_eval["f1"]) / len(train_metrics_eval["f1"]))
             log(cfg.wandb, metrics, epoch, specific_key = "train/mean_f1")
             metrics["test/mean_f1"].append(sum(test_metrics_eval["f1"]) / len(test_metrics_eval["f1"]))
             log(cfg.wandb, metrics, epoch, specific_key = "test/mean_f1")
             for key in test_metrics_eval.keys():
-                metrics[f"train_{key}"].append(train_metrics_eval[key])
-                metrics[f"test_{key}"].append(test_metrics_eval[key])
+                if not "plot" in key:
+                    metrics[f"train_{key}"].append(train_metrics_eval[key])
+                    metrics[f"test_{key}"].append(test_metrics_eval[key])
+
             if metrics["test/mean_f1"][-1] > f1_thres:
                 f1_thres = metrics["test/mean_f1"][-1]
                 log(cfg.wandb, time=epoch, particular_metric_key="test/best_mean_f1", particular_metric_value = f1_thres)
@@ -232,12 +190,36 @@ def train(cfg):
                     model_best = copy.deepcopy(model)
                     torch.save(model_best.state_dict(), os.path.join(cfg.path_to_results, cfg.name_exp, f"seed_{cfg.seed}", "model_best.pth"))
             
-            metrics["test/mean_ece"].append(sum([sum(ece_list) for ece_list in test_metrics_eval["ece"]]) / (len(test_metrics_eval["ece"][0]) * len(test_metrics_eval["ece"])))
+            #metrics["test/mean_ece"].append(sum([sum(ece_list) for ece_list in test_metrics_eval["ece"]]) / (len(test_metrics_eval["ece"][0]) * len(test_metrics_eval["ece"])))
+            metrics["test/mean_ece"].append(sum(test_metrics_eval["ece"]) / len(test_metrics_eval["ece"]))
             log(cfg.wandb, metrics, epoch, specific_key = "test/mean_ece")
-            if verbose and cfg.n_test_data_pred:
-                preds = model.predict(X_test[0:cfg.n_test_data_pred].to(device))
-                print("true:", y_test[0:cfg.n_test_data_pred].detach().cpu().numpy(), "\npred:", preds.detach().cpu().numpy())
 
+            if verbose and cfg.n_test_data_pred:
+                if X_test is not None:
+                    X_to_pred = X_test[0:cfg.n_test_data_pred]
+                    y_to_pred = y_test[0:cfg.n_test_data_pred].detach().cpu().numpy()
+                else:
+                    data_to_pred = [test_data_loder.dataset[i] for i in range(cfg.n_test_data_pred)]
+                    X_to_pred = torch.stack([x[0] for x in data_to_pred])
+                    y_to_pred = [x[1] for x in data_to_pred]
+                    
+                    # p = [x[1] - 1 for x in data_to_pred]
+                    # y = torch.zeros(cfg.n_test_data_pred, cfg.K)
+                    # row_indices = torch.arange(cfg.n_test_data_pred)
+                    # single_mask = [isinstance(idx, torch.Tensor) and idx.ndim == 0 for idx in p]
+                    # single_indices = [idx.item() for idx, is_single in zip(p, single_mask) if is_single]
+                    # single_rows = [i for i, is_single in enumerate(single_mask) if is_single]
+                    # if single_rows:
+                    #     y[single_rows, single_indices] = 1
+                    # multi_mask = [isinstance(idx, torch.Tensor) and idx.ndim > 0 for idx in p]
+                    # for row, (idx, is_multi) in enumerate(zip(p, multi_mask)):
+                    #     if is_multi:
+                    #         y[row, idx] = 1
+                
+                preds = model.predict(X_to_pred.to(device))
+                print("true:", y_to_pred, "\npred:", preds.detach().cpu().numpy())
+
+            print("OOD evaluation")
             ood_metrics_eval = evaluate(model, ood_data_loader, X_ood, y_ood, data_size, cfg.K, device, prefix="ood", threshold=cfg.pred_threshold, verbose=verbose)
             log(cfg.wandb, ood_metrics_eval, epoch, evaluated=True, prefix="ood")
             metrics["ood/mean_likelihood"].append(sum(ood_metrics_eval["likelihood"]) / len(ood_metrics_eval["likelihood"]))
@@ -250,14 +232,24 @@ def train(cfg):
             log(cfg.wandb, metrics, epoch, specific_key = "ood/min_likelihood_mc")
             metrics["ood/mean_f1"].append(sum(ood_metrics_eval["f1"]) / len(ood_metrics_eval["f1"]))
             log(cfg.wandb, metrics, epoch, specific_key = "ood/mean_f1")
-            metrics["ood/mean_ece"].append(sum([sum(ece_list) for ece_list in ood_metrics_eval["ece"]]) / (len(ood_metrics_eval["ece"][0]) * len(ood_metrics_eval["ece"])))
+            metrics["ood/mean_ece"].append(sum(ood_metrics_eval["ece"]) / len(ood_metrics_eval["ece"]))
+            #metrics["ood/mean_ece"].append(sum([sum(ece_list) for ece_list in ood_metrics_eval["ece"]]) / (len(ood_metrics_eval["ece"][0]) * len(ood_metrics_eval["ece"])))
             log(cfg.wandb, metrics, epoch, specific_key = "ood/mean_ece")
             for key in ood_metrics_eval.keys():
-                metrics[f"ood_{key}"].append(ood_metrics_eval[key])
+                if not "plot" in key:
+                    metrics[f"ood_{key}"].append(ood_metrics_eval[key])
 
-        #TODO: add satisfactory_accuracy early stopping
+        # Early stopping based on a moving window of test loss
+        if cfg.early_stopping and cfg.evaluate_freq:
+            patience = 10
+            min_delta = 0.001
+            if epoch > patience * cfg.evaluate_freq:
+                recent_losses = metrics["test_loss"][-patience:]
+                if all(recent_losses[i] - recent_losses[i + 1] < min_delta for i in range(patience - 1)):
+                    print(f"Early stopping at epoch {epoch} due to no improvement in test loss over the last {patience} epochs.")
+                    break
 
-    epochs = range(cfg.n_epochs)
+    epochs = range(epoch+1) if cfg.early_stopping and cfg.evaluate_freq else range(cfg.n_epochs)
     fig = plt.figure(figsize=(12, 4))
 
     plt.subplot(1, 5, 1)
@@ -342,5 +334,16 @@ if __name__ == "__main__":
     # print("[End of training] Metrics summary:")
     # print(metrics_summary)
     with open(os.path.join(cfg.path_to_results, cfg.name_exp, f"seed_{cfg.seed}", "metrics_summary.json"), 'w') as f:
-        json.dump(metrics_summary, f, indent=4)
+        try:
+            json.dump(metrics_summary, f, indent=4)
+        except:
+            print("Error in saving metrics_summary")
+            for k, v in metrics_summary.items():
+                if isinstance(v, list):
+                    if isinstance(v[0], list):
+                        print(k, type(v[0][0]))
+                    else:
+                        print(k, type(v[0]))
+                else:
+                    print(k, type(v))
     print("Training done")

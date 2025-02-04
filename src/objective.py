@@ -49,10 +49,10 @@ def KL_MC(m, s, mu, sig):
     return torch.mean(torch.sum(d1.log_prob(x) - d2.log_prob(x), 1))
 
 
-def ELL_TB(m, s, y, X, l_max = 10.0, XX=None):
+def neg_ELL_TB(m, s, y, X, l_max = 10.0, XX=None):
     """
     Compute the expected negative log-likelihood
-    :return: ELL
+    :return: -ELL
     """
     M = X @ m
 
@@ -88,10 +88,10 @@ def ELL_TB(m, s, y, X, l_max = 10.0, XX=None):
 
     return res
 
-def ELL_TB_mvn(m, S, y, X, l_max = 10.0):
+def neg_ELL_TB_mvn(m, S, y, X, l_max = 10.0):
     """
     Compute the expected negative log-likelihood
-    :return: ELL
+    :return: -ELL
     """
     M = X @ m
     # this might be faster
@@ -131,12 +131,11 @@ def ELL_TB_mvn(m, S, y, X, l_max = 10.0):
     return res
 
 
-def ELL_MC(m, s, y, X, n_samples=1000):
+def neg_ELL_MC(m, s, y, X, n_samples=1000):
     """
     Compute the expected negative log-likelihood with monte carlo
-    :return: ELL
+    :return: -ELL
     """
-    # print(f"ELL_MC: m={m} s={s}")
 
     M = X @ m
     # S = torch.sqrt(X ** 2 @ s ** 2)
@@ -153,10 +152,10 @@ def ELL_MC(m, s, y, X, n_samples=1000):
     return res
 
 
-def ELL_MC_mvn(m, S, y, X, n_samples=1000):
+def neg_ELL_MC_mvn(m, S, y, X, n_samples=1000):
     """
     Compute the expected negative log-likelihood with monte carlo
-    :return: ELL
+    :return: -ELL
     """
     M = X @ m
     # S = torch.diag(X @ S @ X.t())
@@ -179,11 +178,11 @@ def ELL_MC_mvn(m, S, y, X, n_samples=1000):
     return res
 
 
-def ELL_Jak(m, s, t, y, X):
+def neg_ELL_Jak(m, s, t, y, X):
     """
     Compute the expected negative log-likelihood using the bound introduced
     by Jaakkola and Jordan (2000)
-    :return: ELL
+    :return: -ELL
     """
     M = X @ m
     a_t = (torch.sigmoid(t) - 0.5) / t
@@ -202,11 +201,11 @@ def ELL_Jak(m, s, t, y, X):
     return res
 
 
-def ELL_Jak_mvn(m, S, t, y, X):
+def neg_ELL_Jak_mvn(m, S, t, y, X):
     """
     Compute the expected negative log-likelihood using the bound introduced
     by Jaakkola and Jordan (2000)
-    :return: ELL
+    :return: -ELL
     """
     M = X @ m
     a_t = (torch.sigmoid(t) - 0.5) / t
@@ -231,7 +230,7 @@ def ELBO_TB(m, u, y, X, mu, sig, l_max = 10.0, XX=None):
     :return: ELBO
     """
     s = torch.exp(u)
-    return ELL_TB(m, s, y, X, l_max=l_max, XX=XX) + KL(m, s, mu, sig)
+    return neg_ELL_TB(m, s, y, X, l_max=l_max, XX=XX) + KL(m, s, mu, sig)
 
 
 def ELBO_TB_mvn(m, u, y, X, mu, Sig, l_max = 10.0):
@@ -244,7 +243,7 @@ def ELBO_TB_mvn(m, u, y, X, mu, Sig, l_max = 10.0):
     L[torch.tril_indices(p, p, 0).tolist()] = u
     S = L.t() @ L
 
-    return ELL_TB_mvn(m, S, y, X, l_max=l_max) + KL_mvn(m, S, mu, Sig)
+    return neg_ELL_TB_mvn(m, S, y, X, l_max=l_max) + KL_mvn(m, S, mu, Sig)
 
 
 def ELBO_MC(m, u, y, X, mu, sig, n_samples=1000):
@@ -253,7 +252,7 @@ def ELBO_MC(m, u, y, X, mu, sig, n_samples=1000):
     :return: ELBO
     """
     s = torch.exp(u)
-    return ELL_MC(m, s, y, X, n_samples) + KL(m, s, mu, sig)
+    return neg_ELL_MC(m, s, y, X, n_samples) + KL(m, s, mu, sig)
 
 
 def ELBO_MC_mvn(m, u, y, X, mu, Sig, n_samples=1000):
@@ -266,7 +265,7 @@ def ELBO_MC_mvn(m, u, y, X, mu, Sig, n_samples=1000):
     L[torch.tril_indices(p, p, 0).tolist()] = u
     S = L.t() @ L
 
-    return ELL_MC_mvn(m, S, y, X, n_samples) + KL_mvn(m, S, mu, Sig)
+    return neg_ELL_MC_mvn(m, S, y, X, n_samples) + KL_mvn(m, S, mu, Sig)
 
 
 def ELBO_Jak(m, s, t, y, X, mu, sig):
@@ -275,7 +274,7 @@ def ELBO_Jak(m, s, t, y, X, mu, sig):
     Jaakkola and Jordan (2000)
     :return: ELBO
     """
-    return ELL_Jak(m, s, t, y, X) + KL(m, s, mu, sig)
+    return neg_ELL_Jak(m, s, t, y, X) + KL(m, s, mu, sig)
 
 
 def ELBO_Jak_mvn(m, S, t, y, X, mu, Sig, cov=None):
@@ -284,7 +283,7 @@ def ELBO_Jak_mvn(m, S, t, y, X, mu, Sig, cov=None):
     Jaakkola and Jordan (2000)
     :return: ELBO
     """
-    return ELL_Jak_mvn(m, S, t, y, X) + KL_mvn(m, S, mu, Sig)
+    return neg_ELL_Jak_mvn(m, S, t, y, X) + KL_mvn(m, S, mu, Sig)
 
 """## Logistic LL: Multi-head functions"""
 
@@ -296,18 +295,18 @@ def KL_mvn_MH(m_list, S_list, mu_list, Sig_list):
     total_KL = sum(KL_mvn(m, S, mu, Sig) for m, S, mu, Sig in zip(m_list, S_list, mu_list, Sig_list))
     return total_KL
 
-def ELL_TB_MH(m_list, s_list, y_list, X, l_max=10.0, XX=None):
-    total_ELL = sum(ELL_TB(m, s, y, X, l_max=l_max, XX=XX) for m, s, y in zip(m_list, s_list, y_list))
-    return total_ELL
+def neg_ELL_TB_MH(m_list, s_list, y_list, X, l_max=10.0, XX=None):
+    total_neg_ELL = sum(neg_ELL_TB(m, s, y, X, l_max=l_max, XX=XX) for m, s, y in zip(m_list, s_list, y_list))
+    return total_neg_ELL
 
-def ELL_TB_mvn_MH(m_list, S_list, y_list, X, l_max=10.0):
-    total_ELL = sum(ELL_TB_mvn(m, S, y, X, l_max=l_max) for m, S, y in zip(m_list, S_list, y_list))
-    return total_ELL
+def neg_ELL_TB_mvn_MH(m_list, S_list, y_list, X, l_max=10.0):
+    total_neg_ELL = sum(neg_ELL_TB_mvn(m, S, y, X, l_max=l_max) for m, S, y in zip(m_list, S_list, y_list))
+    return total_neg_ELL
 
-def ELL_MC_MH(m_list, s_list, y_list, X, n_samples=1000):
-    total_ELL = sum(ELL_MC(m, s, y, X, n_samples=n_samples) for m, s, y in zip(m_list, s_list, y_list))
-    return total_ELL
+def neg_ELL_MC_MH(m_list, s_list, y_list, X, n_samples=1000):
+    total_neg_ELL = sum(neg_ELL_MC(m, s, y, X, n_samples=n_samples) for m, s, y in zip(m_list, s_list, y_list))
+    return total_neg_ELL
 
-def ELL_MC_mvn_MH(m_list, S_list, y_list, X, n_samples=1000):
-    total_ELL = sum(ELL_MC_mvn(m, S, y, X, n_samples=n_samples) for m, S, y in zip(m_list, S_list, y_list))
-    return total_ELL
+def neg_ELL_MC_mvn_MH(m_list, S_list, y_list, X, n_samples=1000):
+    total_neg_ELL = sum(neg_ELL_MC_mvn(m, S, y, X, n_samples=n_samples) for m, S, y in zip(m_list, S_list, y_list))
+    return total_neg_ELL

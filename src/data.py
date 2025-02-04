@@ -4,9 +4,14 @@ from matplotlib import pyplot as plt
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
+
+from pascal05 import PascalVOCDataset05, create_data
+from pascal12 import PascalVOCDataset12, collate_wrapper, tr, augs
 # FIXME: vbll path // !pip install vbll & import vbll
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from generate_data_matchformat import create_artificialshapes_dataset, load_artificial_shapes_dataset
+
+## SYNTHETIC
 
 def prepare_data_synthetic():
     N = 1000  # number of samples
@@ -57,6 +62,14 @@ def prepare_data_synthetic():
 
     return X, y, X_test, y_test
 
+## SHAPES
+
+# FIXME: hardcoded dependencies
+def get_prependix_dependencies(ood = False):
+    if ood:
+        return "dependencies/dependenciesOOD"
+    return "dependencies/dependenciesDEF"
+
 def get_prependix(bias_classes):
     classes = ['disk', 'square', 'triangle', 'star', 'hexagon', 'pentagon']
     classes_symbols = ["o", "s", "^", "*", "H", "p"]
@@ -72,11 +85,6 @@ def get_appendix(coloured_background, coloured_figues, no_overlap):
     def get_bool_str(v):
         return "T" if v else "F"
     return f"cb{get_bool_str(coloured_background)}_cf{get_bool_str(coloured_figues)}_no{get_bool_str(no_overlap)}"
-
-def get_prependix_dependencies(ood = False):
-    if ood:
-        return "dependencies/dependenciesOOD"
-    return "dependencies/dependenciesDEF"
 
 def create_binary_matrix(indices, num_cols):
     return np.array([[1 if j in row else 0 for j in range(num_cols)] for row in indices])
@@ -95,7 +103,7 @@ def prepare_data_shapes(cfg):
     bias_classes = cfg.get("bias_classes", [0.5, 0.5, 0.0, 0.0, 0.0, 0.0])
     simplicity = cfg.get("simplicity", 1)
 
-    main_dir = "/shared/sets/datasets/vision/artificial_shapes"
+    main_dir = cfg.get("data_path", "/shared/sets/datasets/vision/artificial_shapes")
     # path_to_save = os.path.join(main_dir, f"classes{get_prependix(bias_classes)}_" + f"size{size}_" + f"simplicity{simplicity}_" + f"len{N}_" + get_appendix(coloured_background, coloured_figues, no_overlap))
     path_to_save = os.path.join(main_dir, f"{get_prependix_dependencies(ood=False)}_" + f"size{size}_" + f"len{N}_" + get_appendix(coloured_background, coloured_figues, no_overlap))
     datasetdir = os.path.join(path_to_save, "images")
@@ -125,12 +133,13 @@ def prepare_data_shapes(cfg):
     X = dataset
     X = X * (1/255)
 
-    X_test = torch.tensor(X[-N_test:]).permute(0, 3, 1, 2).double()
-    y_test = torch.tensor(y[-N_test:]).double()
-    X = torch.tensor(X[:N_test]).permute(0, 3, 1, 2).double()
-    y = torch.tensor(y[:N_test]).double()
+    X_test = torch.tensor(X[:N_test]).permute(0, 3, 1, 2).double()
+    y_test = torch.tensor(y[:N_test]).double()
+    X = torch.tensor(X[N_test:]).permute(0, 3, 1, 2).double()
+    y = torch.tensor(y[N_test:]).double()
 
-    # print(N, K, X.shape, y.shape, X_test.shape, y_test.shape)
+    print(f"Your data is of shape: [train] {X.shape}, [test] {X_test.shape}, [num_attributes] {y.shape[1]}")
+
     return X, y, X_test, y_test
 
 def prepare_data_shapes_ood(cfg):
@@ -145,7 +154,7 @@ def prepare_data_shapes_ood(cfg):
     bias_classes_ood = cfg.get("bias_classes_ood", [0.0, 0.0, 1.0, 0.0, 0.0, 0.0])
     simplicity = cfg.get("simplicity_ood", 6)
 
-    main_dir = "/shared/sets/datasets/vision/artificial_shapes"
+    main_dir = cfg.get("data_path", "/shared/sets/datasets/vision/artificial_shapes")
     # path_to_save = os.path.join(main_dir, f"classes{get_prependix(bias_classes_ood)}_" + f"size{size}_" + f"simplicity{simplicity}_" + f"len{N_ood}_" + get_appendix(coloured_background, coloured_figues, no_overlap))
     path_to_save = os.path.join(main_dir, f"{get_prependix_dependencies(ood=True)}_" + f"size{size}_" + f"len{N_ood}_" + get_appendix(coloured_background, coloured_figues, no_overlap))
     datasetdir = os.path.join(path_to_save, "images_ood")
@@ -180,9 +189,56 @@ def prepare_data_shapes_ood(cfg):
 
     return X, y, None, None
 
+## PASCAL-VOC 05
 
-def prepare_dataloader(X, y, batch_size = 64):
+def prepare_data_pascal_voc_05(cfg):
+    
+    main_dir = getattr(cfg, "data_path", "/shared/sets/datasets/vision/pascal")
+    train_dir = os.path.join(main_dir, "VOC2005_1")
+    test_dir = os.path.join(main_dir, "VOC2005_2")
 
-    dataset = TensorDataset(X, y)
+    train_json_file = os.path.join(train_dir, 'TRAIN' + '_images.json')
+    test_json_file = os.path.join(test_dir, 'TEST' + '_images.json')
+    print(train_json_file, test_json_file)
+    if not (os.path.isfile(train_json_file) and os.path.isfile(test_json_file)):
+        create_data(train_dir, test_dir, None)
+    print(f"Your data path will be: {train_json_file}, {test_json_file}")
+
+    dataset = PascalVOCDataset05(train_dir, 'TRAIN', getattr(cfg, "data_size", 300), getattr(cfg, "N", 1843))
+    dataset_test = PascalVOCDataset05(test_dir, 'TEST', getattr(cfg, "data_size", 300), getattr(cfg, "N_test", 389))
+
+    print(f"Your data is of shape: [train] {dataset.dataset_shape}, [test] {dataset_test.dataset_shape}, [num_attributes] {dataset.n_attributes}")
+
+    return dataset, dataset_test
+
+def prepare_loader_pascal_voc_05(dataset, batch_size):
+    return DataLoader(dataset, batch_size=batch_size, shuffle=True,
+                                               collate_fn=dataset.collate_fn, num_workers=4,
+                                               pin_memory=True)
+
+## PASCAL-VOC 12
+
+def prepare_data_pascal_voc_12(cfg):
+    
+    main_dir = getattr(cfg, "data_path", "/shared/sets/datasets/vision/pascal")
+    data_dir = os.path.join(main_dir, "VOC2012")
+
+    dataset = PascalVOCDataset12(data_dir, 'train', getattr(cfg, "data_size", 300), getattr(cfg, "N", 5717), transforms=augs, multi_instance=False)
+    dataset_test = PascalVOCDataset12(data_dir, 'val', getattr(cfg, "data_size", 300), getattr(cfg, "N_test", 5823), transforms=tr)
+
+    print(f"Your data is of shape: [train] {dataset.dataset_shape}, [test] {dataset_test.dataset_shape}, [num_attributes] {dataset.n_attributes}")
+
+    return dataset, dataset_test
+
+def prepare_loader_pascal_voc_12(dataset, batch_size):
+    return DataLoader(dataset, batch_size=batch_size, collate_fn=collate_wrapper, shuffle=True, num_workers=4, pin_memory=True)
+
+
+## ALL
+
+def prepare_dataset(X, y):
+    return TensorDataset(X, y)
+
+def prepare_dataloader(dataset, batch_size = 64):
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     return data_loader

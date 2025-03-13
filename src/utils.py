@@ -20,10 +20,11 @@ def default_dependency(M):
         p_st = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2]
         return [p_o, p_sq, p_t, p_st]
 
-def evaluate(model, test_dataloader, X_test_inactive, y_test_inactive, data_size, K, device, prefix = "", threshold = 0.5, verbose = False):
+def evaluate(model, test_dataloader, X_test_inactive, y_test_inactive, data_size, K, device, prefix = "", threshold = 0.5, verbose = False, plot_confusion=True):
     print("------------------------------------")
     model.eval()
     preds = []
+    y_preds = []
     y_tests = []
     total_loss = 0.0
     total_likelihoods = []
@@ -35,8 +36,9 @@ def evaluate(model, test_dataloader, X_test_inactive, y_test_inactive, data_size
         for X_batch, y_batch in test_dataloader:
             X_batch = X_batch.to(device)
             y_batch = y_batch.to(device)
-            batch_preds = model.predict(X_batch)
+            y_pred, batch_preds = model.predict(X_batch, threshold)
             preds.append(batch_preds)
+            y_preds.append(y_pred)
             y_tests.append(y_batch)
             total_loss += model.test_loss(X_batch, y_batch, data_size, verbose=verbose).item()
             likelihoods = model.compute_likelihood(X_batch, y_batch)
@@ -49,6 +51,7 @@ def evaluate(model, test_dataloader, X_test_inactive, y_test_inactive, data_size
             total_sum_likelihood_mc += sum_likelihood_mc
 
     preds = torch.cat(preds, dim=0)
+    y_pred = torch.cat(y_preds, dim=0)
     y_test = torch.cat(y_tests, dim=0)
     loss = total_loss / len(test_dataloader)
     total_likelihoods = torch.cat(total_likelihoods).mean(dim=0)
@@ -60,7 +63,6 @@ def evaluate(model, test_dataloader, X_test_inactive, y_test_inactive, data_size
     total_likelihoods_mc = total_likelihoods_mc.tolist()
     total_sum_likelihood_mc = total_sum_likelihood_mc / len(test_dataloader)
 
-    y_pred = (preds >= threshold).double()
     assert y_pred.shape == y_test.shape, f"y_pred.shape={y_pred.shape} != y_test.shape={y_test.shape}"
 
     metrics = {
@@ -81,13 +83,16 @@ def evaluate(model, test_dataloader, X_test_inactive, y_test_inactive, data_size
     metrics['hamming_loss_per_attribute'] = hamming_per_attribute.cpu().tolist()
     metrics['ranking_loss'] = label_ranking_loss(y_test.cpu().numpy(), y_pred.cpu().numpy())
     metrics['ranking_avg_precision'] = label_ranking_average_precision_score(y_test.cpu().numpy(), y_pred.cpu().numpy())
-    metrics['ranking_loss_probs'] = label_ranking_loss(y_test.cpu().numpy(), preds.cpu().numpy())
-    metrics['ranking_avg_precision_probs'] = label_ranking_average_precision_score(y_test.cpu().numpy(), preds.cpu().numpy())
+    preds_for_ranking_loss = preds if preds.dim() == 2 else preds[:,:,1] # FIXME: hardcoded
+    metrics['ranking_loss_probs'] = label_ranking_loss(y_test.cpu().numpy(), preds_for_ranking_loss.cpu().numpy())
+    metrics['ranking_avg_precision_probs'] = label_ranking_average_precision_score(y_test.cpu().numpy(), preds_for_ranking_loss.cpu().numpy())
     intersection = torch.sum(y_pred * y_test, dim=0)
     union = torch.sum((y_pred + y_test) > 0, dim=0).float()
     jaccard_per_attribute = intersection / (union + 1e-8)
     metrics['jaccard_score_macro'] = torch.mean(jaccard_per_attribute).item()
     metrics['jaccard_score_per_attribute'] = jaccard_per_attribute.cpu().tolist()
+
+    confidences = model.get_confidences(preds)
 
     for k in range(K):
         metrics["likelihood"].append(likelihoods[k].item())
@@ -103,9 +108,9 @@ def evaluate(model, test_dataloader, X_test_inactive, y_test_inactive, data_size
 
         y_test_k = y_test[:, k]
         y_pred_k = y_pred[:, k]
-        preds_k = preds[:, k]
-
-        ece, ece_plot = do_ece_single_attribute(y_test_k, y_pred_k, preds_k, num_bins=20)
+        preds_one_k = preds[:, k] if len(preds.shape) == 2 else preds[:, k, 1]
+        confidences_k = confidences[:, k]
+        ece, ece_plot = do_ece_single_attribute(y_test_k, y_pred_k, preds_one_k, confidences_k, num_bins=20)
         metrics["ece"].append(ece)
         metrics["ece_plot"].append(ece_plot)
         plt.close(ece_plot)
@@ -113,6 +118,7 @@ def evaluate(model, test_dataloader, X_test_inactive, y_test_inactive, data_size
         if verbose:
             print(f"{prefix} : Label {k}: Loss = {loss:.2f}, SumLikelihood = {total_sum_likelihood:.2f}, MinLikelihood = {min_likelihood:.2f}, SumLikelihoodMC = {total_sum_likelihood_mc:.2f}, MinLikelihoodMC = {min_likelihood_mc:.2f}, ECE = {ece:.2f}, Accuracy = {acc:.2f}, Precision = {precision:.2f}, Recall = {recall:.2f}, F1-score = {f1:.2f}")
     
+    metrics["accuracy_macro"] = torch.mean(torch.tensor(metrics["accuracy"])).item()
     metrics['precision_macro'] = torch.mean(torch.tensor(metrics["precision"])).item()
     metrics['recall_macro'] = torch.mean(torch.tensor(metrics["recall"])).item()
     metrics['f1_macro'] = torch.mean(torch.tensor(metrics["f1"])).item()
@@ -121,6 +127,7 @@ def evaluate(model, test_dataloader, X_test_inactive, y_test_inactive, data_size
     fp = torch.sum((y_pred == 1) & (y_test == 0), dim=0)
     fn = torch.sum((y_pred == 0) & (y_test == 1), dim=0)
     tn = torch.sum((y_pred == 0) & (y_test == 0), dim=0)
+    metrics["accuracy_micro"] = (torch.sum(tp) + torch.sum(tn)) / (torch.sum(tp) + torch.sum(fp) + torch.sum(fn) + torch.sum(tn)).item()
     metrics['precision_micro'] = (torch.sum(tp) / (torch.sum(tp) + torch.sum(fp) + 1e-8)).item()
     metrics['recall_micro'] = (torch.sum(tp) / (torch.sum(tp) + torch.sum(fn) + 1e-8)).item()
     metrics['f1_micro'] = 2 * metrics['precision_micro'] * metrics['recall_micro'] / (metrics['precision_micro'] + metrics['recall_micro'] + 1e-8)
@@ -128,9 +135,13 @@ def evaluate(model, test_dataloader, X_test_inactive, y_test_inactive, data_size
     tree_plot = do_tree_predictions(default_dependency(["o", "s", "^", "*"]), y_pred)
     metrics["tree_predictions_plot"] = tree_plot
     plt.close(tree_plot)
-    conf_plot = do_confusion_row_matrix(y_test, y_pred)
-    metrics["confusion_matrix_plot"] = conf_plot
-    plt.close(conf_plot)
+    if plot_confusion:
+        conf_plot = do_confusion_row_matrix(y_test, y_pred)
+        metrics["confusion_matrix_plot"] = conf_plot
+        plt.close(conf_plot)
+    corr_plot = do_correlation_matrix(y_test, y_pred)
+    metrics["correlation_plot"] = corr_plot
+    plt.close(corr_plot)
     deppred_plot = do_dependent_predictions(y_pred)
     metrics["dependent_predictions_plot"] = deppred_plot
     plt.close(deppred_plot)
@@ -139,12 +150,29 @@ def evaluate(model, test_dataloader, X_test_inactive, y_test_inactive, data_size
 
     return metrics
 
+def do_correlation_matrix(y_test, y_pred):
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    with torch.no_grad():
+        correlation_matrix = np.zeros((y_test.shape[1], 2, 2))
+        for i in range(y_test.shape[1]):
+            heatmap_data, _, _ = np.histogram2d(y_test[:, i].cpu().numpy(), y_pred[:, i].cpu().numpy(), bins=2)
+            correlation_matrix[i] = heatmap_data
+        fig, axes = plt.subplots(nrows=1, ncols=y_test.shape[1], figsize=(20, 5))
+        for i in range(y_test.shape[1]):
+            sns.heatmap(correlation_matrix[i], annot=True, fmt=".2f", cmap="Blues", xticklabels=[0, 1], yticklabels=[0, 1], ax=axes[i])
+            axes[i].set_xlabel("y_test")
+            axes[i].set_ylabel("y_pred")
+            axes[i].set_title(f"Attribute {i+1}")
+    plt.tight_layout()
+    plt.show()
+    return fig
 
 def do_confusion_row_matrix(y_test, y_pred):
     import matplotlib.pyplot as plt
     fig, ax = plt.subplots()
     n_attr = y_test.shape[1]
-    print(y_test, y_pred)
     with torch.no_grad():
         conf_mat = torch.zeros((2**n_attr, 2**n_attr)) # cannot allocate FIXME
         for i in range(2**n_attr):
@@ -156,7 +184,6 @@ def do_confusion_row_matrix(y_test, y_pred):
                     conf_mat[i, j] = torch.sum(torch.all(y_test == true_row, dim=1) & torch.all(y_pred == pred_row, dim=1)).item() / denom
     img = ax.matshow(conf_mat, cmap='hot', interpolation='nearest')
     ax.set_xticks(range(2**n_attr))
-    #ax.set_xticklabels([str([int(x) for x in f"{i:0{n_attr}b}"]) for i in range(2**n_attr)])
     ax.set_yticks(range(2**n_attr))
     ax.set_yticklabels([str([int(x) for x in f"{i:0{n_attr}b}"]) for i in range(2**n_attr)])
     ax.set_title("Accordance matrix")
@@ -178,9 +205,6 @@ def do_tree_predictions(true_dependencies, y_pred):
                     mat_true[i, j * repeat_count * 2 + r] = 1 - value
                     mat_true[i, j * repeat_count * 2 + repeat_count + r] = value
         img = ax[0, 0].imshow(mat_true.numpy(), cmap='hot', interpolation='nearest')
-        # for i in range(len(true_dependencies)):
-        #     for j in range(2**i):
-        #         ax[0, 0].text(j, i, mat_true[i, j], ha="center", va="center", color="blue", fontsize=2)
         plt.colorbar(img, ax=ax[1, 0])
         ax[0, 0].set_title("True dependencies")
                 
@@ -207,9 +231,6 @@ def do_tree_predictions(true_dependencies, y_pred):
                     mat_pred[i, j * repeat_count * 2 + repeat_count + r] = prob_1
             probs_1.append(probs_1_cur)
     img = ax[0, 1].imshow(mat_pred.numpy(), cmap='hot', interpolation='nearest')
-    # for i in range(len(true_dependencies)):
-    #     for j in range(2**i):
-    #         ax[0, 1].text(j, i, f"{mat_pred[i, j]:.4f}", ha="center", va="center", color="blue", fontsize=2)
     plt.colorbar(img, ax=ax[1, 1])
     ax[0, 1].set_title("Predicted dependencies")
 
@@ -253,11 +274,10 @@ def do_dependent_predictions(y_pred):
         plt.colorbar(img, ax=ax[1])
     return fig
 
-def do_ece_single_attribute(y_test, y_pred, preds, num_bins=20):
-    fig, ax = plt.subplots(1, 2)
+def do_ece_single_attribute(y_test, y_pred, preds_one, confidences, num_bins=20):
+    fig, ax = plt.subplots(1, 2, figsize=(20, 5))
     with torch.no_grad():
         bin_boundaries = torch.linspace(0, 1, num_bins + 1, device=y_test.device)
-        confidences = torch.max(torch.stack([preds, 1 - preds]), dim=0)[0]
         bin_indices = torch.bucketize(confidences.contiguous(), bin_boundaries) - 1
         ece = 0.0
         for bin_index in range(num_bins):
@@ -275,7 +295,7 @@ def do_ece_single_attribute(y_test, y_pred, preds, num_bins=20):
         ax[0].set_title(f"ECE plot: {ece:.4f}")
 
         bin_boundaries = torch.linspace(0, 1, num_bins + 1, device=y_test.device)
-        bin_indices = torch.bucketize(preds.contiguous(), bin_boundaries) - 1
+        bin_indices = torch.bucketize(preds_one.contiguous(), bin_boundaries) - 1
         for bin_index in range(num_bins):
             in_bin = (bin_indices == bin_index)
             if in_bin.any():
@@ -285,17 +305,15 @@ def do_ece_single_attribute(y_test, y_pred, preds, num_bins=20):
                 ax[0].text(bin_index / num_bins, max(0.1, min(0.8, bin_accuracy - 0.05)), f"MeanAcc={bin_accuracy:.4f}\nN={bin_size}", ha='center', va='center', color='black', rotation=90)
                 ax[1].set_xlabel("Predictions")
                 ax[1].set_ylabel("Accuracy")
-        ax[1].set_title(f"ECE plot: Mean Acc vs p")
+        ax[1].set_title(f"ECE plot: Mean Acc vs p for 1")
     return ece, fig
     
 
 def compute_confusion_matrix(model, X_test, y_test, K, device, threshold = 0.5):
-    # works for binary classification
     with torch.no_grad():
         X_test = X_test.to(device)
         y_test = y_test.to(device)
-        preds = model.predict(X_test)
-        y_pred = (preds >= threshold).double()
+        y_pred, preds = model.predict(X_test, threshold)
         confusion_matrix = torch.zeros(K, K)
         for i in range(K):
             for j in range(K):
@@ -316,7 +334,6 @@ def modify_last_layer_lr(named_params, backbone_freeze, base_lr, lr_mult_w, lr_m
                 else:
                     params += [{'params': param, 'lr': base_lr, 'weight_decay': base_wd}]
         else:
-            #FIXME: for now it does not work for neither of model type
             if 'bias' in name:
                 params += [{'params': param, 'lr': base_lr * lr_mult_b, 'weight_decay': 0}]
             else:
@@ -324,9 +341,7 @@ def modify_last_layer_lr(named_params, backbone_freeze, base_lr, lr_mult_w, lr_m
     return params
 
 def create_optimizer_scheduler(args, model):
-    # modify learning rate of last layer
     finetune_params = modify_last_layer_lr(model.named_parameters(), args.backbone_freeze, args.lr, args.lr_mult_w, args.lr_mult_b, args.wd, args.last_layer_wd, args.no_wd_last)
-    # define optimizer
     common_params = {
         "lr": args.lr,
         "weight_decay": args.wd
@@ -352,7 +367,6 @@ def create_optimizer_scheduler(args, model):
     optimizer_class = optimizer_map[args.optimizer.lower()]
     optimizer = optimizer_class(finetune_params, **common_params, **optimizer_specific_params[args.optimizer.lower()])
     
-    # define learning rate scheduler
     scheduler = optim.lr_scheduler.StepLR(optimizer, 
                                           step_size=args.lr_decay_in_epoch,
                                           gamma=args.gamma)
@@ -375,9 +389,14 @@ def wandb_init(cfg):
     wandb.define_metric("test/epoch")
     wandb.define_metric("test/*", step_metric="test/epoch")
 
-def log(wandb_log, metrics = None, time = None, time_metric=None, specific_key = None, evaluated = False, prefix = "train", particular_metric_key = None, particular_metric_value = None, figure = None):
+def log(wandb_log, metrics = None, time = None, time_metric=None, specific_key = None, evaluated = False, prefix = "train", particular_metric_key = None, particular_metric_value = None, figure_img = None, figure_summary = None):
     if not wandb_log:
         return
+    elif figure_img is not None:
+        assert particular_metric_key is not None, "Particular metric key must be provided"
+        wandb.log({f"img/{particular_metric_key}": wandb.Image(figure_img)})
+    elif figure_summary is not None:
+        wandb.log({"plots/summary": wandb.Image(figure_summary)})
     elif specific_key is not None:
         assert metrics is not None, "Metrics must be provided"
         if time_metric is not None:
@@ -405,9 +424,14 @@ def log(wandb_log, metrics = None, time = None, time_metric=None, specific_key =
         wandb.log({f"{prefix}/recall_macro": metrics["recall_macro"], f"{prefix}/epoch": time})
         wandb.log({f"{prefix}/f1_macro": metrics["f1_macro"], f"{prefix}/epoch": time})
         if prefix == "test":
-            wandb.log({f"{prefix}/tree_predictions": wandb.Image(metrics["tree_predictions_plot"]), f"{prefix}/epoch": time})
-            wandb.log({f"{prefix}/confusion_matrix": wandb.Image(metrics["confusion_matrix_plot"]), f"{prefix}/epoch": time})
-            wandb.log({f"{prefix}/dependent_predictions": wandb.Image(metrics["dependent_predictions_plot"]), f"{prefix}/epoch": time})
+            if "tree_predictions_plot" in metrics:
+                wandb.log({f"{prefix}/tree_predictions": wandb.Image(metrics["tree_predictions_plot"]), f"{prefix}/epoch": time})
+            if "confusion_matrix_plot" in metrics:
+                wandb.log({f"{prefix}/confusion_matrix": wandb.Image(metrics["confusion_matrix_plot"]), f"{prefix}/epoch": time})
+            if "correlation_plot" in metrics:
+                wandb.log({f"{prefix}/correlation": wandb.Image(metrics["correlation_plot"]), f"{prefix}/epoch": time})
+            if "dependent_predictions_plot" in metrics:
+                wandb.log({f"{prefix}/dependent_predictions": wandb.Image(metrics["dependent_predictions_plot"]), f"{prefix}/epoch": time})
         for k in range(len(metrics["f1"])): # K attributes
             wandb.log({f"{prefix}/{k}/likelihood": metrics["likelihood"][k]})
             wandb.log({f"{prefix}/{k}/likelihood_mc": metrics["likelihood_mc"][k]})
@@ -419,10 +443,6 @@ def log(wandb_log, metrics = None, time = None, time_metric=None, specific_key =
             wandb.log({f"{prefix}/{k}/ece_plot": wandb.Image(metrics["ece_plot"][k])})
             wandb.log({f"{prefix}/{k}/hamming_loss": metrics["hamming_loss_per_attribute"][k], f"{prefix}/epoch": time})
             wandb.log({f"{prefix}/{k}/jaccard_score": metrics["jaccard_score_per_attribute"][k], f"{prefix}/epoch": time})
-            #for cls in range(len(metrics["ece"][k])):
-            #    wandb.log({f"{prefix}/{k}/ece_{cls}": metrics["ece"][k][cls]})
-    elif figure is not None:
-        wandb.log({"plots/summary": wandb.Image(figure)})
     
 def empty_metrics():
     metrics = {
@@ -433,17 +453,19 @@ def empty_metrics():
         "train_loss": [],
         "train_likelihood": [],
         "train_likelihood_mc": [],
-        "train/mean_likelihood": [],
-        "train/min_likelihood": [],
-        "train/mean_likelihood_mc": [],
-        "train/min_likelihood_mc": [],
+        "train/likelihood_mean": [],
+        "train/likelihood_min": [],
+        "train/likelihood_mean_mc": [],
+        "train/likelihood_min_mc": [],
         "train_f1": [],
-        "train/mean_f1": [],
+        "train/f1_macro": [],
         "train_accuracy": [],
+        "train_accuracy_macro": [],
+        "train_accuracy_micro": [],
         "train_precision": [],
         "train_recall": [],
         "train_ece": [],
-        "train/mean_ece": [],
+        "train/ece_mean": [],
         "train_subset_accuracy": [],
         "train_hamming_loss": [],
         "train_hamming_loss_per_attribute": [],
@@ -462,17 +484,19 @@ def empty_metrics():
         "test_loss": [],
         "test_likelihood": [],
         "test_likelihood_mc": [],
-        "test/mean_likelihood": [],
-        "test/min_likelihood": [],
-        "test/mean_likelihood_mc": [],
-        "test/min_likelihood_mc": [],
+        "test/likelihood_mean": [],
+        "test/likelihood_min": [],
+        "test/likelihood_mean_mc": [],
+        "test/likelihood_min_mc": [],
         "test_f1": [],
-        "test/mean_f1": [],
+        "test/f1_macro": [],
         "test_accuracy": [],
+        "test_accuracy_macro": [],
+        "test_accuracy_micro": [],
         "test_precision": [],
         "test_recall": [],
         "test_ece": [],
-        "test/mean_ece": [],
+        "test/ece_mean": [],
         "test_subset_accuracy": [],
         "test_hamming_loss": [],
         "test_hamming_loss_per_attribute": [],
@@ -491,17 +515,19 @@ def empty_metrics():
         "ood_loss": [],
         "ood_likelihood": [],
         "ood_likelihood_mc": [],
-        "ood/mean_likelihood": [],
-        "ood/min_likelihood": [],
-        "ood/mean_likelihood_mc": [],
-        "ood/min_likelihood_mc": [],
+        "ood/likelihood_mean": [],
+        "ood/likelihood_min": [],
+        "ood/likelihood_mean_mc": [],
+        "ood/likelihood_min_mc": [],
         "ood_f1": [],
-        "ood/mean_f1": [],
+        "ood/f1_macro": [],
         "ood_accuracy": [],
+        "ood_accuracy_macro": [],
+        "ood_accuracy_micro": [],
         "ood_precision": [],
         "ood_recall": [],
         "ood_ece": [],
-        "ood/mean_ece": [],
+        "ood/ece_mean": [],
         "ood_subset_accuracy": [],
         "ood_hamming_loss": [],
         "ood_hamming_loss_per_attribute": [],

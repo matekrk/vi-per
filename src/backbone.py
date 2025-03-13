@@ -49,8 +49,12 @@ def get_backbone(cfg):
     data_channels = cfg.data_channels if hasattr(cfg, 'data_channels') else 3
     if cfg.backbone_type == 'ConvNet':
         backbone = ConvNet(data_channels, p).to(torch.double)
-    if cfg.backbone_type == 'MLP':
+    elif cfg.backbone_type == 'MLP':
         backbone = MLP(data_channels, cfg.data_size, p).to(torch.double)
+    elif cfg.backbone_type == 'ResNet34':
+        import torchvision.models as models
+        backbone = models.resnet34(pretrained=cfg.backbone_pretrained)
+        backbone = nn.Sequential(*list(backbone.children())[:-1], nn.Flatten(start_dim=1))
     elif cfg.backbone_type == 'ResNet50':
         import torchvision.models as models
         backbone = models.resnet50(pretrained=cfg.backbone_pretrained)

@@ -24,7 +24,7 @@ class PascalVOCDataset12(Dataset):
         self.transforms = transforms
         self.multi_instance = multi_instance
         self.labels_dict = self.get_labels_dict()
-        self.label_count, self.data = self._load_all_image_paths_labels(split)
+        self.label_count, self.data = self._load_all_image_paths_labels(split, size)
         self.classes_count = self._count_classes()
 
         self.img_size = img_size
@@ -101,10 +101,13 @@ class PascalVOCDataset12(Dataset):
         xml_path = os.path.join(self.directory, 'Annotations', xml_name)
         return xml_path
 
-    def _load_all_image_paths_labels(self, split):
+    def _load_all_image_paths_labels(self, split, size=None):
         label_count = 0
         all_image_paths_labels = []
         images_list = self._get_images_list(split)
+        if size is not None:
+            print("Cutted images list from {} to {}...".format(len(images_list), size))
+            images_list = images_list[:size]
         xml_path_list = [self._get_xml_file_path(image_path)
                         for image_path in images_list]
         for image_path, xml_path in zip(images_list, xml_path_list):

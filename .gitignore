@@ -171,7 +171,6 @@ cfgs/
 cfgs_new/
 cfgs_dep/
 cfgs_dep_old/
-cfgs_cc/
 cfgs_pascal/
 command
 command_new

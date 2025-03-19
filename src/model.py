@@ -281,7 +281,7 @@ class LogisticVI(LLModel):
             print(f"ELBO={ELBO:.2f} mean_log_lik={mean_log_lik:.2f} mean_kl_div={mean_kl_div:.2f}")
         return ELBO
 
-    def compute_likelihood(self, X, y, mc = False, n_samples = 1000):
+    def compute_negative_log_likelihood(self, X, y, mc = False, n_samples = 1000):
         X_processed = self.process(X)
         m_list = [m.to(X.device) for m in self.m_list]
         y_list = [y[:, k] for k in range(self.K)]
@@ -576,7 +576,7 @@ class LogisticVICC(LLModelCC, LogisticVI):
             print(f"ELBO={ELBO:.2f} mean_log_lik={mean_log_lik:.2f} mean_kl_div={mean_kl_div:.2f}")
         return ELBO
 
-    def compute_likelihood(self, X, y, mc = False, n_samples = 1000):
+    def compute_negative_log_likelihood(self, X, y, mc = False, n_samples = 1000):
         X_processed = self.process(X)
         m_list = [m.to(X.device) for m in self.m_list]
         y_list = [y[:, k] for k in range(self.K)]
@@ -709,7 +709,7 @@ class LogisticPointwise(LLModel):
         preds = torch.cat(preds, dim=1)  # Shape: (n_samples, K)
         return preds
 
-    def compute_likelihood(self, X, y, mc = True, n_samples = 1000):
+    def compute_negative_log_likelihood(self, X, y, mc = True, n_samples = 1000):
         """
         Compute the negative log likelihood of the data given the predictions.
 
@@ -922,8 +922,7 @@ class SoftmaxVBLL(LLModel):
             all_preds.append(max_class)
         return torch.stack(all_preds, dim=1), preds
 
-    def compute_likelihood(self, X, y, mc = False, n_samples = 1000):
-        #TODO: VBLL
+    def compute_negative_log_likelihood(self, X, y, mc = False, n_samples = 1000):
         X_processed = self.process(X)
         nlls = []
         for head, y in zip(self.heads, y.T):
@@ -1004,19 +1003,19 @@ class SoftmaxVBLLCC(LLModelCC, SoftmaxVBLL):
             logits.append(logit)
         return torch.stack(logits, dim=1)
     
-    def compute_likelihood(self, X, y, mc=False, n_samples=1000):
+    def compute_negative_log_likelihood(self, X, y, mc=False, n_samples=1000):
         X_processed = self.process(X)
         nlls = []
         logits = []
         for i_k, val_k in enumerate(self.chain_order):
-            relevant_head = val_k # (self.chain_order == i).nonzero().item()
+            relevant_head = val_k
             head = self.heads[relevant_head]
             y_k = y[:, relevant_head]
             if i_k == 0:
                 out = head(X_processed)
             else:
                 out = head(torch.cat((X_processed, torch.cat(logits, dim=1)), dim=1))
-            nll = out.val_loss_fn(y_k.long()) # compute_likelihood(y) # ?? head.predictive(X_processed).log_prob(y).sum(-1) & -logprob.mean(0)
+            nll = out.val_loss_fn(y_k.long())
             nlls.append(nll)
             logit = out.predictive.probs
             logits.append(logit)
@@ -1102,7 +1101,7 @@ class SoftmaxPointwise(LLModel):
     def get_confidences(self, preds):
         return torch.max(preds, dim=-1)[0]
 
-    def compute_likelihood(self, X_batch, y_batch, mc=True):
+    def compute_negative_log_likelihood(self, X_batch, y_batch, mc=True):
         logits = self.forward(X_batch)
         nlls = []
         for val_k in range(self.K):

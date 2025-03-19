@@ -41,9 +41,9 @@ def evaluate(model, test_dataloader, X_test_inactive, y_test_inactive, data_size
             y_preds.append(y_pred)
             y_tests.append(y_batch)
             total_loss += model.test_loss(X_batch, y_batch, data_size, verbose=verbose).item()
-            likelihoods = model.compute_likelihood(X_batch, y_batch)
+            likelihoods = model.compute_negative_log_likelihood(X_batch, y_batch)
             sum_likelihood = sum(likelihoods).item()
-            likelihoods_mc = model.compute_likelihood(X_batch, y_batch, mc=True)
+            likelihoods_mc = model.compute_negative_log_likelihood(X_batch, y_batch, mc=True)
             sum_likelihood_mc = sum(likelihoods_mc).item()
             total_likelihoods.append(likelihoods)
             total_sum_likelihood += sum_likelihood

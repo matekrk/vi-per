@@ -173,7 +173,7 @@ class LogisticVI(LLModel):
         if m_init is None:
             self.m_list = [torch.randn(p, dtype=torch.double) * posterior_mean_init_scale for _ in range(K)]
         else:
-            self.m_list = [m_init[:, k] for k in range(K)]
+            self.m_list = [m_init[:, val_k] for i_k, val_k in enumerate(range(K))]
 
         if s_init is None:
             if method in [0, 4]:
@@ -187,7 +187,7 @@ class LogisticVI(LLModel):
                     self.u_list.append(u)
         else:
             if method in [0, 4]:
-                self.s_list = [s_init[:, k] for k in range(K)]
+                self.s_list = [s_init[:, val_k] for i_k, val_k in enumerate(range(K))]
                 self.u_list = [torch.log(s) for s in self.s_list]
             elif method in [1, 5]:
                 self.u_list = s_init  # Should be list of u tensors for each output
@@ -239,7 +239,7 @@ class LogisticVI(LLModel):
         # Prepare lists for variational parameters and priors
         m_list = [m.to(X_batch.device) for m in self.m_list]
         mu_list = [mu.to(X_batch.device) for mu in self.mu_list]
-        y_list = [y_batch[:, k] for k in range(self.K)]
+        y_list = [y_batch[:, val_k] for i_k, val_k in enumerate(range(self.K))]
 
         if self.method in [0, 4]:
             s_list = [torch.exp(u).to(X_batch.device) for u in self.u_list]
@@ -284,7 +284,7 @@ class LogisticVI(LLModel):
     def compute_negative_log_likelihood(self, X, y, mc = False, n_samples = 1000):
         X_processed = self.process(X)
         m_list = [m.to(X.device) for m in self.m_list]
-        y_list = [y[:, k] for k in range(self.K)]
+        y_list = [y[:, val_k] for i_k, val_k in enumerate(range(self.K))]
         if self.method in [0, 4]:
             s_list = [torch.exp(u).to(X.device) for u in self.u_list]
             if mc:

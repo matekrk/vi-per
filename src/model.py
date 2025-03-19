@@ -318,7 +318,7 @@ class LogisticVI(LLModel):
             return torch.sigmoid(M)
         if self.method in [0, 4]:
             s = torch.exp(u).to(X.device)
-            scaling_factor_diag = torch.sum(m**2 * s)
+            scaling_factor_diag = torch.einsum('bi,i,bi->b', X, s, X) # equiv to torch.sum((X * s) * X, dim=1)
             if not mc:
                 scaling_factor = torch.sqrt(1 + (torch.pi / 8) * scaling_factor_diag)
                 # scaling_factor = torch.sqrt(1 + (torch.pi / 8) * (m.T @ S @ m))
@@ -336,7 +336,8 @@ class LogisticVI(LLModel):
             L[tril_indices[0], tril_indices[1]] = u.to(X.device)
             cov = L @ L.T
             if not mc:
-                scaling_factor = 1 / torch.sqrt(1 + (torch.pi / 8) * (m.T @ cov @ m))
+                scaling_factor_nondiag = torch.einsum('bi,ij,bj->b', X, cov, X) # equiv to torch.sum((X @ cov) * X, dim=1)
+                scaling_factor = 1 / torch.sqrt(1 + (torch.pi / 8) * scaling_factor_nondiag)
                 expected_sigmoid = torch.sigmoid(M * scaling_factor)
             else:
                 mvn = torch.distributions.MultivariateNormal(loc=M, covariance_matrix=cov)

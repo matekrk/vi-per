@@ -580,7 +580,6 @@ class LogisticVICC(LLModelCC, LogisticVI):
         X_processed = self.process(X)
         m_list = [m.to(X.device) for m in self.m_list]
         y_list = [y[:, k] for k in range(self.K)]
-        total_likelihood = torch.tensor(0.0, dtype=torch.double, device=X.device)
         likelihood = []
 
         preds = []
@@ -617,7 +616,6 @@ class LogisticVICC(LLModelCC, LogisticVI):
             else:
                 raise ValueError("Method not recognized")
             likelihood.append(cur_likelihood)
-            total_likelihood += cur_likelihood
 
         return torch.tensor(likelihood)
 

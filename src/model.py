@@ -310,40 +310,61 @@ class LogisticVI(LLModel):
     def get_confidences(self, preds):
         return torch.max(torch.stack([preds, 1 - preds]), dim=0)[0]
 
+    @torch.no_grad
     def expected_sigmoid_multivariate(self, X, m, u, mc=False, n_samples=None):
-        assert not mc or n_samples is not None, "n_samples must be provided for Monte Carlo estimation"
+        assert (
+            not mc or n_samples is not None
+        ), "n_samples must be provided for Monte Carlo estimation"
         m = m.to(X.device)
         M = X @ m
         if self.incorrect_straight_sigmoid:
             return torch.sigmoid(M)
-        if self.method in [0, 4]:
+
+        if self.method in [0, 4]:  # diagonal covariance
             s = torch.exp(u).to(X.device)
-            scaling_factor_diag = torch.einsum('bi,i,bi->b', X, s, X) # equiv to torch.sum((X * s) * X, dim=1)
-            if not mc:
+            if not mc:  # probit approximation
+                scaling_factor_diag = torch.einsum(
+                    "bi,i,bi->b", X, s**2, X
+                )  # equiv to torch.sum((X * s**2) * X, dim=1)
+                assert scaling_factor_diag.shape == torch.Size([X.shape[0]])
                 scaling_factor = torch.sqrt(1 + (torch.pi / 8) * scaling_factor_diag)
                 # scaling_factor = torch.sqrt(1 + (torch.pi / 8) * (m.T @ S @ m))
                 expected_sigmoid = torch.sigmoid(M / scaling_factor)
+
             else:
-                S = torch.sqrt(torch.sum(X ** 2 * (s ** 2), dim=1)) # ref objective.py 142
-                for i in range(len(self.sigmoid_mc_n_samples)):
-                    norm = torch.distributions.Normal(loc=M, scale=S)
-                    samples = norm.sample((n_samples,))
-                    sigmoid_samples = torch.sigmoid(samples)
-                    expected_sigmoid = sigmoid_samples.mean(dim=0)
-        elif self.method in [1, 5]:
-            L = torch.zeros(u.size(0), u.size(0), dtype=torch.double, device=X.device)
-            tril_indices = torch.tril_indices(L.size(0), L.size(1), offset=0).to(X.device)
-            L[tril_indices[0], tril_indices[1]] = u.to(X.device)
-            cov = L @ L.T
-            if not mc:
-                scaling_factor_nondiag = torch.einsum('bi,ij,bj->b', X, cov, X) # equiv to torch.sum((X @ cov) * X, dim=1)
-                scaling_factor = 1 / torch.sqrt(1 + (torch.pi / 8) * scaling_factor_nondiag)
-                expected_sigmoid = torch.sigmoid(M * scaling_factor)
-            else:
-                mvn = torch.distributions.MultivariateNormal(loc=M, covariance_matrix=cov)
-                samples = mvn.sample((n_samples,))
+                S = torch.sqrt(torch.sum(X**2 * s**2, dim=1))  # ref objective.py 142
+                S = torch.sqrt(S)  # diagonal variances -> diagonal stds
+                norm = torch.distributions.Normal(loc=M, scale=S)
+                samples = norm.rsample(n_samples)  # n_samples x batch_size
                 sigmoid_samples = torch.sigmoid(samples)
                 expected_sigmoid = sigmoid_samples.mean(dim=0)
+
+        elif self.method in [1, 5]:  # full-cov matrix
+            L = torch.zeros(u.size(0), u.size(0), dtype=torch.double, device=X.device)
+            tril_indices = torch.tril_indices(L.size(0), L.size(1), offset=0).to(
+                X.device
+            )
+            L[tril_indices[0], tril_indices[1]] = u.to(X.device)
+            cov = L @ L.T
+            if not mc:  # probit approximation
+                scaling_factor_nondiag = torch.einsum(
+                    "bi,ij,bj->b", X, cov, X
+                )  # equiv to torch.sum((X @ cov) * X, dim=1)
+                assert scaling_factor_nondiag.shape == torch.Size([X.shape[0]])
+                scaling_factor = 1 / torch.sqrt(
+                    1 + (torch.pi / 8) * scaling_factor_nondiag
+                )
+                expected_sigmoid = torch.sigmoid(M * scaling_factor)
+
+            else:
+                mvn = torch.distributions.MultivariateNormal(
+                    loc=M, covariance_matrix=cov
+                )
+                samples = mvn.rsample(n_samples)
+                sigmoid_samples = torch.sigmoid(samples)
+                expected_sigmoid = sigmoid_samples.mean(dim=0)
+
+        assert expected_sigmoid.shape == torch.Size([X.shape[0]])
         return expected_sigmoid
 
     def forward(self, X):
@@ -1113,7 +1134,7 @@ class SoftmaxPointwise(LLModel):
             nlls.append(-log_likelihood.sum())
             # nll = F.cross_entropy(logit, y.to(torch.long))
         return torch.stack(nlls)
-    
+
 """ # Softmax Pointwise CC model """
 
 class SoftmaxPointwiseCC(LLModelCC, SoftmaxPointwise):

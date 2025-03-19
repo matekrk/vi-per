@@ -150,6 +150,7 @@ class LogisticVI(LLModel):
                  m_init=None, s_init=None, 
                  prior_mean_learnable=False, prior_scale=1.0, prior_scale_learnable=False,
                  posterior_mean_init_scale=1.0, posterior_var_init_add=0.0,
+                 incorrect_straight_sigmoid=False, sigmoid_mc_computation=False, sigmoid_mc_n_samples=100,
                  l_max=12.0, adaptive_l=False, n_samples=500, backbone=None):
         p = super().__init__(p, K, beta=beta, intercept=intercept, backbone=backbone)
         print(f"[LogisticVI] method={method} l_max={l_max} adaptive_l={adaptive_l} n_samples={n_samples}")
@@ -158,6 +159,10 @@ class LogisticVI(LLModel):
         self.l_max = l_max
         self.adaptive_l = adaptive_l
         self.n_samples = n_samples
+
+        self.incorrect_straight_sigmoid = incorrect_straight_sigmoid
+        self.sigmoid_mc_computation = sigmoid_mc_computation
+        self.sigmoid_mc_n_samples = sigmoid_mc_n_samples
 
         # Initialize prior parameters
         self.prior_mu = nn.Parameter(torch.tensor(0.0, dtype=torch.double), requires_grad=prior_mean_learnable)
@@ -305,6 +310,40 @@ class LogisticVI(LLModel):
     def get_confidences(self, preds):
         return torch.max(torch.stack([preds, 1 - preds]), dim=0)[0]
 
+    def expected_sigmoid_multivariate(self, X, m, u, mc=False, n_samples=None):
+        assert not mc or n_samples is not None, "n_samples must be provided for Monte Carlo estimation"
+        m = m.to(X.device)
+        M = X @ m
+        if self.incorrect_straight_sigmoid:
+            return torch.sigmoid(M)
+        if self.method in [0, 4]:
+            s = torch.exp(u).to(X.device)
+            scaling_factor_diag = torch.sum(m**2 * s)
+            if not mc:
+                scaling_factor = torch.sqrt(1 + (torch.pi / 8) * scaling_factor_diag)
+                # scaling_factor = torch.sqrt(1 + (torch.pi / 8) * (m.T @ S @ m))
+                expected_sigmoid = torch.sigmoid(M / scaling_factor)
+            else:
+                S = torch.sqrt(torch.sum(X ** 2 * (s ** 2), dim=1)) # ref objective.py 142
+                for i in range(len(self.sigmoid_mc_n_samples)):
+                    norm = torch.distributions.Normal(loc=M, scale=S)
+                    samples = norm.sample((n_samples,))
+                    sigmoid_samples = torch.sigmoid(samples)
+                    expected_sigmoid = sigmoid_samples.mean(dim=0)
+        elif self.method in [1, 5]:
+            L = torch.zeros(u.size(0), u.size(0), dtype=torch.double, device=X.device)
+            tril_indices = torch.tril_indices(L.size(0), L.size(1), offset=0).to(X.device)
+            L[tril_indices[0], tril_indices[1]] = u.to(X.device)
+            cov = L @ L.T
+            if not mc:
+                scaling_factor = 1 / torch.sqrt(1 + (torch.pi / 8) * (m.T @ cov @ m))
+                expected_sigmoid = torch.sigmoid(M * scaling_factor)
+            else:
+                mvn = torch.distributions.MultivariateNormal(loc=M, covariance_matrix=cov)
+                samples = mvn.sample((n_samples,))
+                sigmoid_samples = torch.sigmoid(samples)
+                expected_sigmoid = sigmoid_samples.mean(dim=0)
+        return expected_sigmoid
 
     def forward(self, X):
         """
@@ -321,10 +360,11 @@ class LogisticVI(LLModel):
             Predicted probabilities for each output. Shape (n_samples, K).
         """
         X_processed = self.process(X)
+        u_list = [u.to(X_processed.device) for u in self.u_list]
 
         preds = []
-        for m in self.m_list:
-            pred = torch.sigmoid(X_processed @ m.to(X_processed.device))
+        for m, u in zip(self.m_list, u_list):
+            pred = self.expected_sigmoid_multivariate(X_processed, m, u, mc=self.sigmoid_mc_computation, n_samples=self.sigmoid_mc_n_samples)
             preds.append(pred.unsqueeze(1))
 
         preds = torch.cat(preds, dim=1)  # Shape: (n_samples, K)
@@ -354,11 +394,13 @@ class LogisticVICC(LLModelCC, LogisticVI):
     def __init__(self, p, K, method=0, beta=1.0, intercept=False, backbone=None, m_init=None, s_init=None, 
                  prior_mean_learnable=False, prior_scale=1.0, prior_scale_learnable=False,
                  posterior_mean_init_scale=1.0, posterior_var_init_add=0.0,
+                 incorrect_straight_sigmoid=False, sigmoid_mc_computation=False, sigmoid_mc_n_samples=100,
                  l_max=12.0, adaptive_l=False, n_samples=500, chain_order=None):
         LLModelCC.__init__(self, p, K, beta=beta, intercept=intercept, backbone=backbone, chain_order=chain_order)
         LogisticVI.__init__(self, p, K, method=method, beta=beta, intercept=intercept, backbone=backbone, m_init=m_init, s_init=s_init,
                             prior_mean_learnable=prior_mean_learnable, prior_scale=prior_scale, prior_scale_learnable=prior_scale_learnable,
                             posterior_mean_init_scale=posterior_mean_init_scale, posterior_var_init_add=posterior_var_init_add,
+                            incorrect_straight_sigmoid=incorrect_straight_sigmoid, sigmoid_mc_computation=sigmoid_mc_computation, sigmoid_mc_n_samples=sigmoid_mc_n_samples,
                             l_max=l_max, adaptive_l=adaptive_l, n_samples=n_samples)
         print(f"[LogisticVICC]")
 
@@ -462,12 +504,17 @@ class LogisticVICC(LLModelCC, LogisticVI):
 
         preds = []
         for i, k in enumerate(self.chain_order):
+            relevant_head = (self.chain_order == i).nonzero().item() # if numpy then np.nonzero(self.chain_order == i)[0].item()
             if i == 0:
-                pred = torch.sigmoid(X_processed @ self.heads[(self.chain_order == i).nonzero().item()].to(X_processed.device))
+                pred_after_sigmoid = self.expected_sigmoid_multivariate(X_processed, self.m_list[relevant_head], self.u_list[relevant_head].to(X_processed.device), mc=self.sigmoid_mc_computation, n_samples=self.sigmoid_mc_n_samples)
+                # pred = X_processed @ self.heads[relevant_head].to(X_processed.device)
             else:
                 prev_preds = torch.cat(preds, dim=1)
-                pred = torch.sigmoid(torch.cat((X_processed, prev_preds), dim=1) @ self.heads[(self.chain_order == i).nonzero().item()].to(X_processed.device))
-            preds.append(pred.unsqueeze(1))
+                # pred = torch.cat((X_processed, prev_preds), dim=1) @ self.heads[relevant_head].to(X_processed.device)
+                pred_after_sigmoid = self.expected_sigmoid_multivariate(torch.cat((X_processed, prev_preds), dim=1), self.m_list[relevant_head], self.u_list[relevant_head].to(X_processed.device), mc=self.sigmoid_mc_computation, n_samples=self.sigmoid_mc_n_samples)
+            # preds.append(pred.unsqueeze(1))
+            preds.append(pred_after_sigmoid.unsqueeze(1))
+        # preds = [torch.sigmoid(pred) for pred in preds]
         return torch.cat(preds, dim=1)
 
     def compute_ELBO(self, X_batch, y_batch, data_size, verbose=False, other_beta=None):
@@ -488,8 +535,10 @@ class LogisticVICC(LLModelCC, LogisticVI):
                 X = X_processed
             else:
                 X = torch.cat((X_processed, torch.cat(preds, dim=1)), dim=1)
-            pred = torch.sigmoid(X @ m_list[relevant_head].to(X_processed.device))
-            preds.append(pred.unsqueeze(1))
+            # pred = X @ m_list[relevant_head].to(X_processed.device)
+            pred_after_sigmoid = self.expected_sigmoid_multivariate(X, m_list[relevant_head], self.u_list[relevant_head].to(X.device), mc=self.sigmoid_mc_computation, n_samples=self.sigmoid_mc_n_samples)
+            # preds.append(pred.unsqueeze(1))
+            preds.append(pred_after_sigmoid.unsqueeze(1))
 
             if self.method in [0, 4]:
                 s = torch.exp(self.u_list[relevant_head].to(X_batch.device))
@@ -541,8 +590,10 @@ class LogisticVICC(LLModelCC, LogisticVI):
                 XX = X_processed
             else:
                 XX = torch.cat((X_processed, torch.cat(preds, dim=1)), dim=1)
-            pred = torch.sigmoid(XX @ m_list[relevant_head].to(X.device))
-            preds.append(pred.unsqueeze(1))
+            # pred = XX @ m_list[relevant_head].to(X.device)
+            pred_after_sigmoid = self.expected_sigmoid_multivariate(XX, m_list[relevant_head], self.u_list[relevant_head].to(X.device), mc=self.sigmoid_mc_computation, n_samples=self.sigmoid_mc_n_samples)
+            # preds.append(pred.unsqueeze(1))
+            preds.append(pred_after_sigmoid.unsqueeze(1))
 
             if self.method in [0, 4]:
                 s = torch.exp(self.u_list[relevant_head].to(X.device))
@@ -553,7 +604,7 @@ class LogisticVICC(LLModelCC, LogisticVI):
                     cur_likelihood = -neg_ELL_TB(m_list[relevant_head], s, y_list[relevant_head], XX, l_max=self.l_terms)
 
             elif self.method in [1, 5]:
-                u = self.u_list[k].to(X.device)
+                u = self.u_list[relevant_head].to(X.device)
                 L = torch.zeros(self.p, self.p, dtype=torch.double, device=X.device)
                 tril_indices = torch.tril_indices(self.p, self.p, 0).to(X.device)
                 L[tril_indices[0], tril_indices[1]] = u

@@ -20,7 +20,7 @@ def default_dependency(M):
         p_st = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2]
         return [p_o, p_sq, p_t, p_st]
 
-def evaluate(model, test_dataloader, X_test_inactive, y_test_inactive, data_size, K, device, prefix = "", threshold = 0.5, verbose = False, plot_confusion=True):
+def evaluate(model, test_dataloader, K, device, prefix = "", threshold = 0.5, verbose = False, plot_confusion=True):
     print("------------------------------------")
     model.eval()
     preds = []
@@ -31,6 +31,7 @@ def evaluate(model, test_dataloader, X_test_inactive, y_test_inactive, data_size
     total_sum_likelihood = 0.0
     total_likelihoods_mc = []
     total_sum_likelihood_mc = 0.0
+    data_size = len(test_dataloader.dataset)
 
     with torch.no_grad():
         for X_batch, y_batch in test_dataloader:

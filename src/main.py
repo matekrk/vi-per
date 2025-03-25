@@ -78,9 +78,9 @@ def train(cfg):
     model.backbone.train()
 
     # init evaluation turned off
-    # evaluate(model, data_loader, X, y, data_size, cfg.K, device, prefix="train", threshold=cfg.pred_threshold)
-    # evaluate(model, test_data_loder, X_test, y_test, data_size, cfg.K, device, prefix="test", threshold=cfg.pred_threshold)
-    # evaluate(model, ood_data_loader, X_ood, y_ood, data_size, cfg.K, device, prefix="ood", threshold=cfg.pred_threshold)
+    # evaluate(model, data_loader, cfg.K, device, prefix="train", threshold=cfg.pred_threshold)
+    # evaluate(model, test_data_loder, cfg.K, device, prefix="test", threshold=cfg.pred_threshold)
+    # evaluate(model, ood_data_loader, cfg.K, device, prefix="ood", threshold=cfg.pred_threshold)
 
     optimizer, scheduler = create_optimizer_scheduler(cfg, model)
     num_learnable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -88,8 +88,8 @@ def train(cfg):
 
     model_best = None
     f1_thres = cfg.f1_thres
-    best_train_f1_macro, best_train_subset_acc, best_train_acc_macro, best_train_likelihood_mean, best_train_hamming_loss, best_train_mean_ece = -1.0, -1.0, -1.0, 1.0, 1.0, 1.0
-    best_test_f1_macro, best_test_subset_acc, best_test_acc_macro, best_test_likelihood_mean, best_test_hamming_loss, best_test_mean_ece = -1.0, -1.0, -1.0, 1.0, 1.0, 1.0
+    best_train_f1_macro, best_train_subset_acc, best_train_acc_macro, best_train_likelihood_mean, best_train_hamming_loss, best_train_mean_ece = 0.0, 0.0, 0.0, 1.0, 1.0, 1.0
+    best_test_f1_macro, best_test_subset_acc, best_test_acc_macro, best_test_likelihood_mean, best_test_hamming_loss, best_test_mean_ece = 0.0, 0.0, 0.0, 1.0, 1.0, 1.0
     log(cfg.wandb, time=0, particular_metric_key="best/train_f1_macro", particular_metric_value = best_train_f1_macro)
     log(cfg.wandb, time=0, particular_metric_key="best/train_subset_acc", particular_metric_value = best_train_subset_acc)
     log(cfg.wandb, time=0, particular_metric_key="best/train_acc_macro", particular_metric_value = best_train_acc_macro)

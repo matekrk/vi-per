@@ -162,7 +162,11 @@ cython_debug/
 # VS Code
 .vscode/
 
+# VS Code
+.vscode/
+
 # personal
+wandb.txt
 wandb.txt
 data/
 slurms/

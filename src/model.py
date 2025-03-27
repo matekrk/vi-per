@@ -411,6 +411,7 @@ class LogisticPointwiseCC(LLModelCC, LogisticPointwise):
         X_processed = X_processed.to(torch.double)
         m_list = [m.to(X_processed.device) for m in self.m_list]
         prev_list = []
+        probabilities = []
         for i, k in enumerate(self.chain_order):
             if i == 0:
                 logit = (X_processed @ m_list[(self.chain_order == i).nonzero().item()]).to(X_processed.device)
@@ -427,8 +428,9 @@ class LogisticPointwiseCC(LLModelCC, LogisticPointwise):
                 prev_list.append((probability > 0.5).float().unsqueeze(1))
             # elif self.chain_type == "true":
             #     prev_list.append(y_batch[:, k].unsqueeze(1))
+            probabilities.append(probability.unsqueeze(1))
         
-        return torch.cat(probability, dim=1)
+        return torch.cat(probabilities, dim=1)
 
 
 """## Sigmoid-logistic (VI-PER) model"""

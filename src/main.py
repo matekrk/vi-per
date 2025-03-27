@@ -164,10 +164,10 @@ def train(cfg):
 
             epochs_eval.append(epoch)
             print("Train evaluation")
-            train_metrics_eval = evaluate(model, data_loader, X, y, data_size, cfg.K, device, prefix="train", threshold=cfg.pred_threshold, verbose=verbose, plot_confusion=cfg.data_type != "pascal12")
+            train_metrics_eval = evaluate(model, data_loader, cfg.K, device, prefix="train", threshold=cfg.pred_threshold, verbose=verbose_iter, plot_confusion=cfg.data_type != "pascal12")
             log(cfg.wandb, train_metrics_eval, epoch, evaluated=True, prefix="train")
             print("Test evaluation")
-            test_metrics_eval = evaluate(model, test_data_loder, X_test, y_test, data_size, cfg.K, device, prefix="test", threshold=cfg.pred_threshold, verbose=verbose, plot_confusion=cfg.data_type != "pascal12")
+            test_metrics_eval = evaluate(model, test_data_loder, cfg.K, device, prefix="test", threshold=cfg.pred_threshold, verbose=verbose_iter, plot_confusion=cfg.data_type != "pascal12")
             log(cfg.wandb, test_metrics_eval, epoch, evaluated=True, prefix="test")
             
             metrics["train/likelihood_mean"].append(sum(train_metrics_eval["likelihood"]) / len(train_metrics_eval["likelihood"]))
@@ -268,7 +268,7 @@ def train(cfg):
 
             if cfg.data_type_ood != None:
                 print("OOD evaluation")
-                ood_metrics_eval = evaluate(model, ood_data_loader, X_ood, y_ood, data_size, cfg.K, device, prefix="ood", threshold=cfg.pred_threshold, verbose=verbose, plot_confusion=cfg.data_type != "pascal12")
+                ood_metrics_eval = evaluate(model, ood_data_loader, cfg.K, device, prefix="ood", threshold=cfg.pred_threshold, verbose=verbose_iter, plot_confusion=cfg.data_type != "pascal12")
                 log(cfg.wandb, ood_metrics_eval, epoch, evaluated=True, prefix="ood")
                 metrics["ood/likelihood_mean"].append(sum(ood_metrics_eval["likelihood"]) / len(ood_metrics_eval["likelihood"]))
                 log(cfg.wandb, metrics, epoch, specific_key = "ood/likelihood_mean")

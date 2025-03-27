@@ -8,7 +8,7 @@ from objective import KL, KL_mvn, neg_ELL_MC_MH, neg_ELL_TB_MH, KL_MH, neg_ELL_M
 
 """## Load VBLL"""
 def load_vbll(vbll_path):
-    sys.path.append(os.path.abspath(vbll_path)) # alternatively use os.path.join(vbll_path, '..')))
+    sys.path.append(os.path.abspath(vbll_path)) # currently VBLL v0.4.0.1
     try:
         import vbll
         print("vbll found")

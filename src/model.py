@@ -8,7 +8,7 @@ from objective import KL, KL_mvn, neg_ELL_MC_MH, neg_ELL_TB_MH, KL_MH, neg_ELL_M
 
 """## Load VBLL"""
 def load_vbll(vbll_path):
-    sys.path.append(os.path.abspath(vbll_path)) # currently VBLL v0.4.0.1
+    sys.path.append(os.path.abspath(vbll_path)) # currently VBLL v0.4.0.2
     try:
         import vbll
         print("vbll found")
@@ -1562,11 +1562,12 @@ class SoftmaxVBLL(LLModel):
                                         num_classes,
                                         self.beta,
                                         softmax_bound=cfg.SOFTMAX_BOUND,
-                                        # return_empirical=cfg.RETURN_EMPIRICAL,
-                                        # softmax_bound_empirical=cfg.SOFTMAX_BOUND_EMPIRICAL,
+                                        return_empirical=cfg.RETURN_EMPIRICAL,
+                                        softmax_bound_empirical=cfg.SOFTMAX_BOUND_EMPIRICAL,
                                         parameterization = cfg.PARAMETRIZATION,
                                         return_ood=cfg.RETURN_OOD,
                                         prior_scale=cfg.PRIOR_SCALE,
+                                        noise_label=cfg.NOISE_LABEL
                                        )
 
     def _make_gen_vbll_layer(self, num_hidden, num_classes, cfg):
@@ -1576,11 +1577,12 @@ class SoftmaxVBLL(LLModel):
                                         num_classes,
                                         self.beta,
                                         softmax_bound=cfg.SOFTMAX_BOUND,
-                                        # return_empirical=cfg.RETURN_EMPIRICAL,
-                                        # softmax_bound_empirical=cfg.SOFTMAX_BOUND_EMPIRICAL,
+                                        return_empirical=cfg.RETURN_EMPIRICAL,
+                                        softmax_bound_empirical=cfg.SOFTMAX_BOUND_EMPIRICAL,
                                         parameterization = cfg.PARAMETRIZATION,
                                         return_ood=cfg.RETURN_OOD,
-                                        prior_scale=cfg.PRIOR_SCALE)
+                                        prior_scale=cfg.PRIOR_SCALE,
+                                        noise_label=cfg.NOISE_LABEL)
 
     def train_loss(self, X_batch, y_batch, data_size=None, verbose=False):
         data_size = data_size or X_batch.shape[0]

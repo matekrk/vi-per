@@ -409,14 +409,15 @@ class LogisticPointwiseCC(LLModelCC, LogisticPointwise):
     def forward(self, X_batch):
         X_processed = self.process(X_batch)
         X_processed = X_processed.to(torch.double)
+        m_list = [m.to(X_processed.device) for m in self.m_list]
         prev_list = []
         for i, k in enumerate(self.chain_order):
             if i == 0:
-                logit = (X_processed @ self.heads[(self.chain_order == i).nonzero().item()]).to(X_processed.device)
+                logit = (X_processed @ m_list[(self.chain_order == i).nonzero().item()]).to(X_processed.device)
                 probability = torch.sigmoid(logit)
             else:
                 prev_cat = torch.cat(prev_list, dim=1)
-                logit = (torch.cat((X_processed, prev_cat), dim=1) @ self.heads[(self.chain_order == i).nonzero().item()]).to(X_processed.device)
+                logit = (torch.cat((X_processed, prev_cat), dim=1) @ m_list[(self.chain_order == i).nonzero().item()]).to(X_processed.device)
                 probability = torch.sigmoid(logit)
             if self.chain_type == "logit":
                 prev_list.append(logit.unsqueeze(1))
@@ -1183,7 +1184,7 @@ class LogisticVICC(LLModelCC, LogisticVI):
             Number of samples for Monte Carlo estimation. Default is 1000.
         """
         X_processed = self.process(X_batch)
-        m_list = [m.to(X.device) for m in self.m_list]
+        m_list = [m.to(X_batch.device) for m in self.m_list]
         y_list = [y_batch[:, k] for k in range(self.K)]
         likelihood = []
 

@@ -282,7 +282,7 @@ class LogisticPointwise(LLModel):
         assert preds.shape == (X.shape[0], self.K), f"preds.shape={preds.shape} != (X.shape[0], {self.K})"
         return preds
     
-    def predict(self, X):
+    def predict(self, X, threshold=0.5):
         """
         Predict binary labels for each output given input data.
         
@@ -299,7 +299,7 @@ class LogisticPointwise(LLModel):
             Predicted probabilities for each output. Shape (n_samples, K).
         """
         preds = self.forward(X)
-        return (preds > 0.5).float(), preds
+        return (preds > threshold).float(), preds
 
     def compute_negative_log_likelihood(self, X, y, mc = False, n_samples = 1000):
         """

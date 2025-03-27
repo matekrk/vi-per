@@ -325,7 +325,9 @@ def modify_last_layer_lr(named_params, backbone_freeze, base_lr, lr_mult_w, lr_m
     if last_layer_wd is None:
         last_layer_wd = base_wd
     params = list()
+    print("Model architecture...")
     for name, param in named_params:
+        print(name, f"gradient: {param.requires_grad}", f"shape: {param.shape}")
         if 'backbone' in name:
             if backbone_freeze:
                 param.requires_grad = False

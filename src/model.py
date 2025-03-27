@@ -46,7 +46,7 @@ class LLModel(nn.Module):
         self.K = K
         self.backbone = backbone
         self.beta = beta
-        self.params = self.get_learnable_parameters()
+        # self.params = self.get_learnable_parameters()
         return p
     
     def get_learnable_parameters(self):
@@ -181,7 +181,7 @@ class LogisticPointwise(LLModel):
             self.m_list = [nn.Parameter(m_init[:, k]) for k in range(self.K)]
 
 
-        self.params = self.get_learnable_parameters()
+        # self.params = self.get_learnable_parameters()
     
     def get_learnable_parameters(self):
         params = nn.ParameterList(self.m_list)
@@ -404,7 +404,7 @@ class LogisticPointwiseCC(LLModelCC, LogisticPointwise):
         for m in self.m_list:
             m.requires_grad = True
 
-        self.params = self.get_learnable_parameters()
+        # self.params = self.get_learnable_parameters()
     
     def forward(self, X_batch):
         X_processed = self.process(X_batch)
@@ -609,7 +609,7 @@ class LogisticVI(LLModel):
         for u in self.u_list:
             u.requires_grad = True
 
-        self.params = self.get_learnable_parameters()
+        # self.params = self.get_learnable_parameters()
 
         # Initialize l_terms for adaptive l
         if adaptive_l:
@@ -1023,7 +1023,7 @@ class LogisticVICC(LLModelCC, LogisticVI):
         for u in self.u_list:
             u.requires_grad = True
 
-        self.params = self.get_learnable_parameters()
+        # self.params = self.get_learnable_parameters()
 
     def get_learnable_parameters(self):
         params = nn.ParameterList(self.m_list + self.u_list)
@@ -1034,6 +1034,24 @@ class LogisticVICC(LLModelCC, LogisticVI):
         if self.backbone is not None:
             params += list(self.backbone.parameters())
         return params
+
+    #FIXME: fix these calls
+    """
+    def get_learnable_named_parameters(self):
+        params = {}
+        for i, m in enumerate(self.m_list):
+            params[f"m_list[{i}]"] = m
+        for i, u in enumerate(self.u_list):
+            params[f"u_list[{i}]"] = u
+        if self.prior_mean_learnable:
+            params["prior_mu"] = self.prior_mu
+        if self.prior_scale_learnable:
+            params["prior_u_sig"] = self.prior_u_sig
+        if self.backbone is not None:
+            for name, param in self.backbone.named_parameters():
+                params[f"backbone.{name}"] = param
+        return params
+    """
 
     def forward(self, X_batch):
         """
@@ -1242,7 +1260,7 @@ class SoftmaxPointwise(LLModel):
         self.heads = nn.ModuleList([self.make_output_layer(num_classes=self.num_classes_lst[k]) for k in range(self.K)])
         self.loss = nn.CrossEntropyLoss(reduction='mean')
 
-        self.params = self.get_learnable_parameters()
+        # self.params = self.get_learnable_parameters()
 
     def get_learnable_parameters(self):
         params = []
@@ -1412,7 +1430,7 @@ class SoftmaxPointwiseCC(LLModelCC, SoftmaxPointwise):
         self.heads = nn.ModuleList([self.heads[(self.chain_order == i_k).nonzero().item()] for i_k, val_k in enumerate(self.chain_order)])
         self.loss = nn.CrossEntropyLoss(reduction='mean')
 
-        self.params = self.get_learnable_parameters()
+        # self.params = self.get_learnable_parameters()
 
     def make_output_layer(self, num_classes, in_features=None):
         if in_features is None:
@@ -1538,7 +1556,7 @@ class SoftmaxVBLL(LLModel):
 
         self.heads = nn.ModuleList([self.make_output_layer(num_hidden=self.p, num_classes=self.num_classes_lst[k]) for k in range(self.K)])
 
-        self.params = self.get_learnable_parameters()
+        # self.params = self.get_learnable_parameters()
 
     def get_learnable_parameters(self):
         params = []

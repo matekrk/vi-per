@@ -720,7 +720,7 @@ class LogisticVI(LLModel):
         ELBO = mean_log_lik - beta*mean_kl_div
         if verbose:
             print(f"ELBO={ELBO:.2f} mean_log_lik={mean_log_lik:.2f} mean_kl_div={mean_kl_div:.2f}")
-        assert ELBO.shape == torch.Size([1]), f"ELBO.shape={ELBO.shape} != (1)"
+        assert ELBO.shape == torch.Size([]), f"ELBO.shape={ELBO.shape} != ()"
         return ELBO
 
     def compute_negative_log_likelihood(self, X, y, mc = False, n_samples = 1000):
@@ -1138,6 +1138,9 @@ class LogisticVICC(LLModelCC, LogisticVI):
             else:
                 raise ValueError("Method not recognized")
 
+            assert likelihood.shape == torch.Size([]), f"likelihood.shape={likelihood.shape} != ()"
+            assert KL_div.shape == torch.Size([]), f"KL_div.shape={KL_div.shape} != ()"
+
         mean_log_lik = likelihood/batch_size
         mean_kl_div = KL_div/data_size
         beta = other_beta or self.beta
@@ -1199,7 +1202,7 @@ class LogisticVICC(LLModelCC, LogisticVI):
                     cur_likelihood = -neg_ELL_TB_mvn(m_list[i_relevant], S, y_list[i_relevant], X, l_max=self.l_terms)
             else:
                 raise ValueError("Method not recognized")
-            assert cur_likelihood.shape == torch.Size([1]), f"cur_likelihood.shape={cur_likelihood.shape} != (1)"
+            assert cur_likelihood.shape == torch.Size([]), f"cur_likelihood.shape={cur_likelihood.shape} != ()"
             likelihood.append(cur_likelihood)
         assert len(likelihood) == self.K, f"likelihood must have length {self.K}"
         return torch.tensor(likelihood)
@@ -1252,16 +1255,16 @@ class SoftmaxPointwise(LLModel):
     def make_output_layer(self, num_classes):
         return nn.Linear(self.p, num_classes).to(torch.double)
 
-    # TODO: regularization
-    # def regularization(self):
-    #     """
-    #     Compute the L2 regularization term.
-    #     """
-    #     reg = 0.0
-    #     for head in self.heads:
-    #            for param in head.parameters():
-    #                 log_prob += torch.sum(param**2)
-    #     return reg
+    # FIXME: is that regularization is ok?
+    def regularization(self):
+        """
+        Compute the L2 regularization term.
+        """
+        reg = 0.0
+        for head in self.heads:
+               for param in head.parameters():
+                    log_prob += torch.sum(param**2)
+        return reg
 
     def train_loss(self, X_batch, y_batch, data_size=None, verbose=False):
         """
@@ -1275,13 +1278,13 @@ class SoftmaxPointwise(LLModel):
         for i, (head,y) in enumerate(zip(self.heads,y_batch.T)):
             pred = head(X_processed)
             loss_head = self.loss(pred, y.to(torch.long))
-            assert loss_head.shape == torch.Size([1]), f"loss_head.shape={loss_head.shape} != (1)"
+            assert loss_head.shape == torch.Size([]), f"loss_head.shape={loss_head.shape} != ()" # loss_head.ndim == 0 alternatively
             total_loss += loss_head
             if verbose:
                 print(f"head={i} loss={loss_head:.2f}")
 
-        reg_loss = self.regularization()
-        if verbose and self.beta:
+        reg_loss = self.regularization() if self.beta else torch.tensor(0.0, dtype=torch.double, device=X_batch.device)
+        if verbose:
             print(f"reg_loss={reg_loss:.2f}")
         total_loss += self.beta * reg_loss
 
@@ -1366,7 +1369,7 @@ class SoftmaxPointwise(LLModel):
             assert true_class_probs.shape == torch.Size([X_batch.shape[0]]), f"true_class_probs.shape"
             log_likelihood = torch.log(true_class_probs)
             nll = -log_likelihood.sum()
-            assert nll.shape == torch.Size([1]), f"nll.shape={nll.shape} != (1)"
+            assert nll.shape == torch.Size([]), f"nll.shape={nll.shape} != ()"
             nlls.append(nll)
         return torch.stack(nlls)
 
@@ -1433,7 +1436,8 @@ class SoftmaxPointwiseCC(LLModelCC, SoftmaxPointwise):
             if i_k == 0:
                 X = X_processed
             else:
-                X = torch.cat((X_processed, prev_list), dim=1)
+                prev_cat = torch.cat(prev_list, dim=1)
+                X = torch.cat((X_processed, prev_cat), dim=1)
             logit = self.heads[val_k](X)
             logits.append(logit)
             if self.chain_type == "logit":
@@ -1474,13 +1478,13 @@ class SoftmaxPointwiseCC(LLModelCC, SoftmaxPointwise):
                 logit = self.heads[val_k](torch.cat((X_processed, prev_logits), dim=1))
                 loss_head = self.loss(logit, y_batch.T[val_k].to(torch.long))
             assert logit.shape == torch.Size([X_batch.shape[0], self.num_classes_lst[val_k]]), f"logit.shape={logit.shape} != (X_batch.shape[0], {self.num_classes_lst[val_k]})"
-            assert loss_head.shape == torch.Size([1]), f"loss_head.shape={loss_head.shape} != (1)"
+            assert loss_head.shape == torch.Size([]), f"loss_head.shape={loss_head.shape} != (1)"
             logits.append(logit)
             total_loss += loss_head
             if verbose:
                 print(f"head={i_k} loss={loss_head:.2f}")
 
-        reg_loss = self.regularization()
+        reg_loss = self.regularization() if self.beta else torch.tensor(0.0, dtype=torch.double, device=X_batch.device)
         if verbose:
             print(f"reg_loss={reg_loss:.2f}")
         total_loss += self.beta * reg_loss

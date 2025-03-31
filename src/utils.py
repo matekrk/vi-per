@@ -309,16 +309,16 @@ def do_ece_single_attribute(y_test, y_pred, preds_one, confidences, num_bins=20)
         ax[1].set_title(f"ECE plot: Mean Acc vs p for 1")
     return ece, fig
     
-
+@torch.no_grad()
 def compute_confusion_matrix(model, X_test, y_test, K, device, threshold = 0.5):
-    with torch.no_grad():
-        X_test = X_test.to(device)
-        y_test = y_test.to(device)
-        y_pred, preds = model.predict(X_test, threshold)
-        confusion_matrix = torch.zeros(K, K)
-        for i in range(K):
-            for j in range(K):
-                confusion_matrix[i, j] = torch.sum((y_test[:, i] == 1) & (y_pred[:, j] == 1))
+    model.eval()
+    X_test = X_test.to(device)
+    y_test = y_test.to(device)
+    y_pred, preds = model.predict(X_test, threshold)
+    confusion_matrix = torch.zeros(K, K)
+    for i in range(K):
+        for j in range(K):
+            confusion_matrix[i, j] = torch.sum((y_test[:, i] == 1) & (y_pred[:, j] == 1))
     return confusion_matrix
 
 def modify_last_layer_lr(named_params, backbone_freeze, base_lr, lr_mult_w, lr_mult_b, base_wd, last_layer_wd = None, no_wd_last = False):

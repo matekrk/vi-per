@@ -171,6 +171,7 @@ wandb.txt
 data/
 slurms/
 results/
+bn_shapes
 cfgs/
 cfgs_new/
 cfgs_dep/
@@ -182,3 +183,4 @@ command_new
 command_dep
 command_cc
 command_pascal
+command_each

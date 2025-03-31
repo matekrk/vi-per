@@ -1281,11 +1281,11 @@ class SoftmaxPointwise(LLModel):
         """
         Compute the L2 regularization term.
         """
-        reg = 0.0
+        log_prob = 0.0
         for head in self.heads:
                for param in head.parameters():
                     log_prob += torch.sum(param**2)
-        return reg
+        return log_prob
 
     def train_loss(self, X_batch, y_batch, data_size=None, verbose=False):
         """

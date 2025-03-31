@@ -466,23 +466,22 @@ class LogisticVI(LLModel):
         """
         return [torch.exp(u) for u in self.u_list]
     
-    @property
-    def L_single(self, u):
+    def S_single(self, i_relevant):
         """
         Return the covariance matrix for a single output.
         """
+        u = self.u_list[i_relevant]
         L = torch.zeros(self.p, self.p, dtype=torch.double, device=u.device)
         tril_indices = torch.tril_indices(self.p, self.p, 0).to(u.device)
         L[tril_indices[0], tril_indices[1]] = u
         return L @ L.t()
-        
 
     @property
     def S_list(self):
         """
         Return the covariance matrices for each output.
         """
-        return [self.L_single(u) for u in self.u_list]  
+        return [self.S_single(i_k) for i_k in range(self.K)]  
 
     def __init__(self, p, K, method=0, l_max=12.0, adaptive_l=False, n_samples=500, beta=1.0, intercept=False, 
                  prior_mu=None, prior_u_sig=None, prior_mean_learnable=False, prior_scale_init=1.0, prior_scale_learnable=False,
@@ -776,7 +775,7 @@ class LogisticVI(LLModel):
         return torch.max(torch.stack([preds, 1 - preds]), dim=0)[0]
 
     @torch.no_grad
-    def expected_sigmoid_multivariate(self, X, m, u, mc=False, n_samples=None):
+    def expected_sigmoid_multivariate(self, X, i_relevant, mc=False, n_samples=None, i_k=None):
         """
         Compute the expected sigmoid function for a multivariate normal distribution. 
         This works for both diagonal and full covariance matrices, but only for one output at a time.
@@ -803,14 +802,14 @@ class LogisticVI(LLModel):
             Before applying the sigmoid function. Not working properly for MC. Shape (n_samples).
         """
         assert (not mc or n_samples is not None), "n_samples must be provided for Monte Carlo estimation"
-        m = m.to(X.device)
-        u = u.to(X.device)
+        m = self.m_list[i_relevant].to(X.device)
         
         M = X @ m # just take mean of the distribution
         if self.incorrect_straight_sigmoid:
             return torch.sigmoid(M), M
 
         if self.method in [0, 4]:
+            u = self.u[i_relevant].to(X.device)
             s = torch.exp(u)
             if not mc: # probit approximation
                 scaling_factor_diag = torch.einsum("bi,i,bi->b", X, s**2, X)
@@ -828,7 +827,7 @@ class LogisticVI(LLModel):
                 M_corrected = M
 
         elif self.method in [1, 5]:
-            cov = self.L_single(u)
+            cov = self.S_single(i_relevant).to(X.device)
             if not mc: # probit approximation
                 scaling_factor_nondiag = torch.einsum("bi,ij,bj->b", X, cov, X)
                 assert scaling_factor_nondiag.shape == torch.Size([X.shape[0]])
@@ -863,11 +862,10 @@ class LogisticVI(LLModel):
             Predicted probabilities for each output. Shape (n_samples, K).
         """
         X_processed = self.process(X)
-        u_list = [u.to(X_processed.device) for u in self.u_list]
 
         preds = []
-        for m, u in zip(self.m_list, u_list):
-            probs, logits = self.expected_sigmoid_multivariate(X_processed, m, u, mc=self.sigmoid_mc_computation, n_samples=self.sigmoid_mc_n_samples)
+        for i_k in range(self.K):
+            probs, logits = self.expected_sigmoid_multivariate(X_processed, i_k, mc=self.sigmoid_mc_computation, n_samples=self.sigmoid_mc_n_samples)
             preds.append(probs.unsqueeze(1))
 
         preds = torch.cat(preds, dim=1)
@@ -899,11 +897,11 @@ class LogisticVICC(LLModelCC, LogisticVI):
         """
         return [torch.exp(u) for u in self.u_list]
     
-    @property
-    def L_single(self, u, i_k):
+    def S_single(self, i_k):
         """
         Return the covariance matrix for a single output.
         """
+        u = self.u_list[i_k]
         L = torch.zeros(self.p + self.chain_order[i_k], self.p + self.chain_order[i_k], dtype=torch.double, device=u.device)
         tril_indices = torch.tril_indices(self.p + self.chain_order[i_k], self.p + self.chain_order[i_k], 0).to(u.device)
         L[tril_indices[0], tril_indices[1]] = u
@@ -1077,7 +1075,7 @@ class LogisticVICC(LLModelCC, LogisticVI):
             else:
                 prev_cat = torch.cat(prev_list, dim=1)
                 X = torch.cat((X_processed, prev_cat), dim=1)
-            probability, logit = self.expected_sigmoid_multivariate(X, self.m_list[i_relevant], self.u_list[i_relevant].to(X_processed.device), mc=self.sigmoid_mc_computation, n_samples=self.sigmoid_mc_n_samples)
+            probability, logit = self.expected_sigmoid_multivariate(X, i_relevant, mc=self.sigmoid_mc_computation, n_samples=self.sigmoid_mc_n_samples)
             preds.append(probability.unsqueeze(1))
             if self.chain_type == "logit":
                 prev_list.append(logit.unsqueeze(1))
@@ -1125,7 +1123,7 @@ class LogisticVICC(LLModelCC, LogisticVI):
                 X = X_processed
             else:
                 X = torch.cat((X_processed, torch.cat(prev_list, dim=1)), dim=1)
-            probability, logit = self.expected_sigmoid_multivariate(X, m_list[i_relevant], self.u_list[i_relevant], mc=self.sigmoid_mc_computation, n_samples=self.sigmoid_mc_n_samples)
+            probability, logit = self.expected_sigmoid_multivariate(X, i_relevant, mc=self.sigmoid_mc_computation, n_samples=self.sigmoid_mc_n_samples)
             if self.chain_type == "logit":
                 prev_list.append(logit.unsqueeze(1))
             elif self.chain_type == "probability":
@@ -1148,7 +1146,7 @@ class LogisticVICC(LLModelCC, LogisticVI):
             elif self.method in [1, 5]:
 
                 u = self.u_list[i_relevant].to(X_batch.device)
-                S = self.L_single(u, i_relevant).to(X_batch.device)
+                S = self.S_single(u, i_relevant).to(X_batch.device)
                 Sig = self.prior_Sig_list[i_relevant].to(X_batch.device)
                 if self.method == 1:
                     likelihood += -neg_ELL_TB_mvn(m_list[i_relevant], S, y_list[i_relevant], X, l_max=self.l_terms)
@@ -1197,7 +1195,7 @@ class LogisticVICC(LLModelCC, LogisticVI):
                 X = X_processed
             else:
                 X = torch.cat((X_processed, torch.cat(prev_list, dim=1)), dim=1)
-            probability, logit = self.expected_sigmoid_multivariate(X, m_list[i_relevant], self.u_list[i_relevant].to(X.device), mc=self.sigmoid_mc_computation, n_samples=self.sigmoid_mc_n_samples)
+            probability, logit = self.expected_sigmoid_multivariate(X, i_relevant, mc=self.sigmoid_mc_computation, n_samples=self.sigmoid_mc_n_samples)
             if self.chain_type == "logit":
                 prev_list.append(logit.unsqueeze(1))
             elif self.chain_type == "probability":
@@ -1216,7 +1214,7 @@ class LogisticVICC(LLModelCC, LogisticVI):
 
             elif self.method in [1, 5]:
                 u = self.u_list[i_relevant].to(X.device)
-                S = self.L_single(u, i_relevant).to(X.device)
+                S = self.S_single(u, i_relevant).to(X.device)
                 if mc:
                     cur_likelihood = -neg_ELL_MC_mvn(m_list[i_relevant], S, y_list[i_relevant], X, n_samples=n_samples)
                 else:

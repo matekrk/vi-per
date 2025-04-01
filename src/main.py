@@ -6,14 +6,14 @@ import sys
 import matplotlib.pyplot as plt
 import torch
 
-from backbone import get_backbone
 from data import prepare_dataset, prepare_dataloader, \
     prepare_data_shapes, prepare_data_shapes_ood, \
     prepare_data_pascal_voc_05, prepare_data_pascal_voc_12, \
     prepare_loader_pascal_voc_05, prepare_loader_pascal_voc_12
-from model import create_model
-from utils import compute_confusion_matrix, create_optimizer_scheduler, \
-    empty_metrics, default_config, evaluate, wandb_init, log
+from models import get_backbone
+from utils import create_model, create_optimizer_scheduler, \
+    empty_metrics, default_config, \
+    evaluate, compute_confusion_matrix, wandb_init, log
 from plot_results import plot_summary
 
 default_config = default_config()

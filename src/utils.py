@@ -10,6 +10,8 @@ import warnings
 from sklearn.exceptions import UndefinedMetricWarning
 warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
 
+import models
+
 def default_dependency(M):
     if len(M) == 1:
         return [[1.0]]
@@ -19,6 +21,27 @@ def default_dependency(M):
         p_t = [0.67, 0.67, 0.33, 0.33]
         p_st = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2]
         return [p_o, p_sq, p_t, p_st]
+
+"""# General / Utils model"""
+def create_model(cfg, backbone = None):
+
+    model_classes = {
+        "logisticvi": models.LogisticVI,
+        "logisticpointwise": models.LogisticPointwise,
+        "softmaxvbll": models.SoftmaxVBLL,
+        "softmaxpointwise": models.SoftmaxPointwise,
+        "cc_logisticvi": models.LogisticVICC,
+        "cc_logisticpointwise": models.LogisticPointwiseCC,
+        "cc_softmaxvbll": models.SoftmaxVBLLCC,
+        "cc_softmaxpointwise": models.SoftmaxPointwiseCC,
+    }
+    if cfg.model_type not in model_classes:
+        raise ValueError(f"Unknown model_type={cfg.model_type}")
+
+    model_class = model_classes[cfg.model_type]
+    model_args = {k: v for k, v in vars(cfg).items() if k in model_class.__init__.__code__.co_varnames}
+    print(model_args)
+    return model_class(**model_args, backbone=backbone)
 
 def evaluate(model, test_dataloader, K, device, prefix = "", threshold = 0.5, verbose = False, plot_confusion=True):
     print("------------------------------------")

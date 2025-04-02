@@ -473,7 +473,7 @@ class LogisticVICC(LLModelCC, LogisticVI):
         Return the prior covariance matrices for each output. Depending on the chain order the dimensionality differs.
         """
         ps = self.prior_scale
-        return [ps.expand(self.p + val_k) for _, val_k in enumerate(self.chain_order)]
+        return [torch.eye(self.p + val_k, dtype=torch.double, device=ps.device) * ps for _, val_k in enumerate(self.chain_order)]
 
     @property
     def s_list(self):

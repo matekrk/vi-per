@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from generic import LLModel, LLModelCC
+from .generic import LLModel, LLModelCC
 
 """## Sigmoid-pointwise model"""
 class LogisticPointwise(LLModel):

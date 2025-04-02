@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from generic import LLModel, LLModelCC
+from .generic import LLModel, LLModelCC
 
 """## Softmax-pointwise model"""
 class SoftmaxPointwise(LLModel):

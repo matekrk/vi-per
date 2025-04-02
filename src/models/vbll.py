@@ -2,7 +2,7 @@ import sys
 import os
 import torch
 import torch.nn as nn
-from generic import LLModel, LLModelCC
+from .generic import LLModel, LLModelCC
 
 """## Load VBLL"""
 def load_vbll(vbll_path):

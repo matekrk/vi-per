@@ -43,7 +43,8 @@ class ConvNet(nn.Module):
         x = self.avgpool2(nn.functional.relu(self.conv2(x)))
         x = self.avgpool3(nn.functional.relu(self.conv3(x)))
         x = torch.flatten(x, start_dim=1)
-        x = nn.functional.relu(self.fc1(x))
+        # x = nn.functional.relu(self.fc1(x))
+        x = self.fc1(x)
         return x
 
 class MLP(nn.Module):

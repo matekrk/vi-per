@@ -385,7 +385,7 @@ class LogisticVI(LLModel):
             return torch.sigmoid(M), M
 
         if self.method in [0, 4]:
-            u = self.u[i_relevant].to(X_batch_processed.device)
+            u = self.u_list[i_relevant].to(X_batch_processed.device)
             s = torch.exp(u)
             if not mc: # probit approximation
                 scaling_factor_diag = torch.einsum("bi,i,bi->b", X_batch_processed, s**2, X_batch_processed)
@@ -765,8 +765,7 @@ class LogisticVICC(LLModelCC, LogisticVI):
 
             elif self.method in [1, 5]:
 
-                u = self.u_list[i_relevant].to(X_batch.device)
-                S = self.S_single(u, i_relevant).to(X_batch.device)
+                S = self.S_single(i_relevant).to(X_batch.device)
                 Sig = self.prior_Sig_list[i_relevant].to(X_batch.device)
                 if self.method == 1:
                     likelihood += -neg_ELL_TB_mvn(m_list[i_relevant], S, y_list[i_relevant], X, l_max=self.l_terms)
@@ -844,7 +843,7 @@ class LogisticVICC(LLModelCC, LogisticVI):
 
             elif self.method in [1, 5]:
                 u = self.u_list[i_relevant].to(X.device)
-                S = self.S_single(u, i_relevant).to(X.device)
+                S = self.S_single(i_relevant).to(X.device)
                 if mc:
                     cur_likelihood = -neg_ELL_MC_mvn(m_list[i_relevant], S, y_list[i_relevant], X, n_samples=n_samples)
                 else:

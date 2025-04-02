@@ -597,6 +597,7 @@ def default_config():
             "VBLL_PATH": None,
             "VBLL_TYPE": None,
             "VBLL_SOFTMAX_BOUND": None,
+            "VBLL_SOFTMAX_BOUND_EMPIRICAL": None,
             "VBLL_RETURN_EMPIRICAL": None,
             "VBLL_RETURN_OOD": None,
             "VBLL_PRIOR_SCALE": None,

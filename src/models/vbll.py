@@ -6,7 +6,7 @@ from .generic import LLModel, LLModelCC
 
 """## Load VBLL"""
 def load_vbll(vbll_path):
-    sys.path.append(os.path.abspath(vbll_path)) # currently VBLL v0.4.0.2
+    sys.path.append(os.path.abspath(vbll_path)) # currently VBLL v0.4.0.2 after 0fcea86800d137a3d9f49853c2570e38462a1a4b
     try:
         import vbll
         print("vbll found")

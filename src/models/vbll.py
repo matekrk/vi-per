@@ -174,12 +174,12 @@ class SoftmaxVBLL(LLModel):
         """
         X_processed = self.process(X_batch)
 
-        probs = []
+        probs_lst = []
         for head in self.heads:
             distr = head(X_processed).predictive
             probs = distr.probs
-            probs.append(probs)
-        return torch.stack(probs, dim=1)
+            probs_lst.append(probs)
+        return torch.stack(probs_lst, dim=1)
 
     @torch.no_grad()
     def predict(self, X_batch, threshold=None):
@@ -385,14 +385,15 @@ class SoftmaxVBLLCC(LLModelCC, SoftmaxVBLL):
             - The logits for each output are stacked along a new dimension to form the final output tensor.
         """
         X_processed = self.process(X)
-        logits = []
+        probs_lst = []
         for i_k, val_k in enumerate(self.chain_order):
             if i_k == 0:
-                logit = self.heads[val_k](X_processed).predictive.probs
+                X = X_processed
             else:
-                logit = self.heads[val_k](torch.cat((X_processed, torch.cat(logits, dim=1)), dim=1)).predictive.probs
-            logits.append(logit)
-        return torch.stack(logits, dim=1)
+                X = torch.cat((X_processed, torch.cat(probs_lst, dim=1)), dim=1)
+            distr = self.heads[val_k](X).predictive
+            probs_lst.append(distr.probs)
+        return torch.stack(probs_lst, dim=1)
     
     def compute_negative_log_likelihood(self, X, y, mc=False, n_samples=1000):
         """

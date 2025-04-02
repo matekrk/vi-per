@@ -447,14 +447,14 @@ class LogisticVI(LLModel):
         """
         X_processed = self.process(X_batch)
 
-        preds = []
+        lst_probs = []
         for i_k in range(self.K):
             probs, logits = self.expected_sigmoid_multivariate(X_processed, i_k, mc=self.sigmoid_mc_computation, n_samples=self.sigmoid_mc_n_samples)
-            preds.append(probs.unsqueeze(1))
+            lst_probs.append(probs.unsqueeze(1))
 
-        preds = torch.cat(preds, dim=1)
-        assert preds.shape == (X_batch.shape[0], self.K), f"preds.shape={preds.shape} != (X.shape[0], {self.K})"
-        return preds
+        probs = torch.cat(lst_probs, dim=1)
+        assert probs.shape == (X_batch.shape[0], self.K), f"preds.shape={probs.shape} != (X.shape[0], {self.K})"
+        return probs
 
 
 """## Sigmoid-logistic CC (VI-PER) model"""
@@ -678,7 +678,7 @@ class LogisticVICC(LLModelCC, LogisticVI):
         X_processed = self.process(X_batch)
         X_processed = X_processed.to(torch.double)
 
-        preds = []
+        probs_list = []
         prev_list = []
         for i_k, val_k in enumerate(self.chain_order):
             i_relevant = (self.chain_order == i_k).nonzero().item()
@@ -688,7 +688,7 @@ class LogisticVICC(LLModelCC, LogisticVI):
                 prev_cat = torch.cat(prev_list, dim=1)
                 X = torch.cat((X_processed, prev_cat), dim=1)
             probability, logit = self.expected_sigmoid_multivariate(X, i_relevant, mc=self.sigmoid_mc_computation, n_samples=self.sigmoid_mc_n_samples)
-            preds.append(probability.unsqueeze(1))
+            probs_list.append(probability.unsqueeze(1))
             if self.chain_type == "logit":
                 prev_list.append(logit.unsqueeze(1))
             elif self.chain_type == "probability":
@@ -697,7 +697,7 @@ class LogisticVICC(LLModelCC, LogisticVI):
                 prev_list.append((probability > 0.5).float().unsqueeze(1))
             # elif self.chain_type == "true":
             #     prev_list.append(y_batch[:, k].unsqueeze(1))
-        out = torch.cat(preds, dim=1)
+        out = torch.cat(probs_list, dim=1)
         assert out.shape == (X_batch.shape[0], self.K), f"out.shape={out.shape} != (X_batch.shape[0], {self.K})"
         return out
 

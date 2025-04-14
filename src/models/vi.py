@@ -30,7 +30,10 @@ class LogisticVI(LLModel):
         Return the prior covariance matrices for each output.
         """
         ps = self.prior_scale
-        return [torch.eye(self.p, dtype=torch.double, device=ps.device) * ps for _ in range(self.K)]
+        if self.method in [0, 4]:
+            return [torch.ones(self.p, dtype=torch.double, device=ps.device) * ps for _ in range(self.K)]
+        elif self.method in [1, 5]:
+            return [torch.eye(self.p, dtype=torch.double, device=ps.device) * ps for _ in range(self.K)]
 
     @property
     def s_list(self):
@@ -472,7 +475,10 @@ class LogisticVICC(LLModelCC, LogisticVI):
         Return the prior covariance matrices for each output. Depending on the chain order the dimensionality differs.
         """
         ps = self.prior_scale
-        return [torch.eye(self.p + val_k, dtype=torch.double, device=ps.device) * ps for _, val_k in enumerate(self.chain_order)]
+        if self.method in [0, 4]:
+            return [torch.ones(self.p + val_k, dtype=torch.double, device=ps.device) * ps for _, val_k in enumerate(self.chain_order)]
+        elif self.method in [1, 5]:
+            return [torch.eye(self.p + val_k, dtype=torch.double, device=ps.device) * ps for _, val_k in enumerate(self.chain_order)]
 
     @property
     def s_list(self):
@@ -753,7 +759,7 @@ class LogisticVICC(LLModelCC, LogisticVI):
             #     prev_list.append(y_batch[:, k].unsqueeze(1))
 
             if self.method in [0, 4]:
-                s = torch.exp(self.u_list[i_relevant].to(X_batch.device))
+                s = self.s_list[i_relevant].to(X_batch.device)
                 sig = self.prior_Sig_list[i_relevant].to(X_batch.device)
                 if self.method == 0:
                     likelihood += -neg_ELL_TB(m_list[i_relevant], s, y_list[i_relevant], X, l_max=self.l_terms)

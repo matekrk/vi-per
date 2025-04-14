@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from generic import LLModel, LLModelCC
+from .generic import LLModel, LLModelCC
 from objective import KL, KL_mvn, neg_ELL_MC_MH, neg_ELL_TB_MH, KL_MH, neg_ELL_MC_mvn_MH, neg_ELL_TB_mvn_MH, KL_mvn_MH, neg_ELL_MC, neg_ELL_TB, neg_ELL_MC_mvn, neg_ELL_TB_mvn
 
 """## Sigmoid-logistic (VI-PER) model"""

@@ -371,7 +371,7 @@ def compute_confusion_matrix(model, X_test, y_test, K, device, threshold = 0.5, 
 def modify_last_layer_lr(named_params, backbone_freeze, base_lr, lr_mult_w, lr_mult_b, base_wd, last_layer_wd = None, no_wd_last = False):
     if last_layer_wd is None:
         last_layer_wd = base_wd
-    params = list()
+    modified_named_params = torch.nn.ParameterList()
     print("Model architecture...")
     for name, param in named_params:
         print(name, f"gradient: {param.requires_grad}", f"shape: {param.shape}")
@@ -380,18 +380,19 @@ def modify_last_layer_lr(named_params, backbone_freeze, base_lr, lr_mult_w, lr_m
                 param.requires_grad = False
             else:
                 if 'bias' in name:
-                    params += [{'params': param, 'lr': base_lr, 'weight_decay': 0}]
+                    modified_named_params += [{'params': param, 'lr': base_lr, 'weight_decay': 0}]
                 else:
-                    params += [{'params': param, 'lr': base_lr, 'weight_decay': base_wd}]
+                    modified_named_params += [{'params': param, 'lr': base_lr, 'weight_decay': base_wd}]
         else:
             if 'bias' in name:
-                params += [{'params': param, 'lr': base_lr * lr_mult_b, 'weight_decay': 0}]
+                modified_named_params += [{'params': param, 'lr': base_lr * lr_mult_b, 'weight_decay': 0}]
             else:
-                params += [{'params': param, 'lr': base_lr * lr_mult_w, 'weight_decay': 0 if no_wd_last else last_layer_wd}]
-    return params
+                modified_named_params += [{'params': param, 'lr': base_lr * lr_mult_w, 'weight_decay': 0 if no_wd_last else last_layer_wd}]
+    return modified_named_params
 
 def create_optimizer_scheduler(args, model):
-    finetune_params = modify_last_layer_lr(model.named_parameters(), args.backbone_freeze, args.lr, args.lr_mult_w, args.lr_mult_b, args.wd, args.last_layer_wd, args.no_wd_last)
+    model_params = model.get_learnable_parameters()
+    finetune_params = modify_last_layer_lr(model_params, args.backbone_freeze, args.lr, args.lr_mult_w, args.lr_mult_b, args.wd, args.last_layer_wd, args.no_wd_last)
     common_params = {
         "lr": args.lr,
         "weight_decay": args.wd
@@ -417,9 +418,12 @@ def create_optimizer_scheduler(args, model):
     optimizer_class = optimizer_map[args.optimizer.lower()]
     optimizer = optimizer_class(finetune_params, **common_params, **optimizer_specific_params[args.optimizer.lower()])
     
-    scheduler = optim.lr_scheduler.StepLR(optimizer, 
-                                          step_size=args.lr_decay_in_epoch,
-                                          gamma=args.gamma)
+    if args.lr_decay_in_epoch:
+        scheduler = optim.lr_scheduler.StepLR(optimizer, 
+                                            step_size=args.lr_decay_in_epoch,
+                                            gamma=args.gamma)
+    else:
+        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: 1.0)
     return optimizer, scheduler
 
 def wandb_unpack(file_path):

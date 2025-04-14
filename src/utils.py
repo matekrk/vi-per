@@ -23,7 +23,9 @@ def default_dependency(M):
         return [p_o, p_sq, p_t, p_st]
 
 """# General / Utils model"""
-def create_model(cfg, backbone = None):
+def create_model(cfg):
+
+    backbone = models.get_backbone(cfg)
 
     model_classes = {
         "logisticvi": models.LogisticVI,

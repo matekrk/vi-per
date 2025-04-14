@@ -10,8 +10,7 @@ from data import prepare_dataset, prepare_dataloader, \
     prepare_data_shapes, prepare_data_shapes_ood, \
     prepare_data_pascal_voc_05, prepare_data_pascal_voc_12, \
     prepare_loader_pascal_voc_05, prepare_loader_pascal_voc_12
-from models import get_backbone
-from utils import create_model, create_optimizer_scheduler, \
+from utils import create_model, create_optimizer_scheduler, empty_grads_norm_metrics, \
     empty_metrics, default_config, \
     evaluate, compute_confusion_matrix, wandb_init, log
 from plot_results import plot_summary
@@ -71,9 +70,7 @@ def train(cfg):
         X_ood, y_ood = None, None
         ood_data_loader = None
 
-    backbone = get_backbone(cfg)
-
-    model = create_model(cfg, backbone).to(device) # can later use next(model.parameters()).device ?
+    model = create_model(cfg).to(torch.double).to(device)
 
     model_init = copy.deepcopy(model)
 
@@ -119,7 +116,7 @@ def train(cfg):
         epoch_loss = 0
         model.train()
         for iter, (X_batch, y_batch) in enumerate(data_loader):
-            X_batch, y_batch = X_batch.to(device), y_batch.to(device)
+            X_batch, y_batch = X_batch.to(torch.double).to(device), y_batch.to(torch.double).to(device)
             optimizer.zero_grad()
             loss = model.train_loss(X_batch, y_batch, data_size, verbose=verbose_iter)
             loss.backward()

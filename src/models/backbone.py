@@ -98,23 +98,27 @@ def get_backbone(cfg):
     p = cfg.p if hasattr(cfg, 'p') else 64
     data_channels = cfg.data_channels if hasattr(cfg, 'data_channels') else 3
     if cfg.backbone_type == 'ConvNet':
-        backbone = ConvNet(data_channels, p).to(torch.double)
+        backbone = ConvNet(data_channels, p)
     elif cfg.backbone_type == 'MLP':
-        backbone = MLP(data_channels, cfg.data_size, p).to(torch.double)
+        backbone = MLP(data_channels, cfg.data_size, p)
     elif cfg.backbone_type == 'ResNet34':
-        import torchvision.models as models
-        backbone = models.resnet34(pretrained=cfg.backbone_pretrained)
+        import torchvision.models as torchmodels
+        backbone = torchmodels.resnet34(pretrained=cfg.backbone_pretrained)
         backbone = nn.Sequential(*list(backbone.children())[:-1], nn.Flatten(start_dim=1))
     elif cfg.backbone_type == 'ResNet50':
-        import torchvision.models as models
-        backbone = models.resnet50(pretrained=cfg.backbone_pretrained)
+        import torchvision.models as torchmodels
+        backbone = torchmodels.resnet50(pretrained=cfg.backbone_pretrained)
         backbone = nn.Sequential(*list(backbone.children())[:-1], nn.Flatten(start_dim=1))
     elif cfg.backbone_type == 'ResNet18':
-        import torchvision.models as models
-        backbone = models.resnet18(pretrained=cfg.backbone_pretrained)
+        import torchvision.models as torchmodels
+        backbone = torchmodels.resnet18(pretrained=cfg.backbone_pretrained)
         backbone = nn.Sequential(*list(backbone.children())[:-1], nn.Flatten(start_dim=1))
     elif cfg.backbone_type == "MobileNetV2":
-        import torchvision.models as models
-        backbone = models.mobilenet_v2(pretrained=cfg.backbone_pretrained)
+        import torchvision.models as torchmodels
+        backbone = torchmodels.mobilenet_v2(pretrained=cfg.backbone_pretrained)
         backbone = nn.Sequential(*list(backbone.children())[:-1] + [nn.AdaptiveAvgPool2d((1, 1)), nn.Flatten(start_dim=1)])
-    return backbone
+    elif cfg.backbone_type == "none":
+        backbone = None
+    else:
+        raise ValueError(f"Backbone type '{cfg.backbone_type}' not recognized. Please specify a valid backbone type.")
+    return backbone.to(torch.double) if backbone is not None else None

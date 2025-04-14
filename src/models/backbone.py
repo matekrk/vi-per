@@ -3,13 +3,49 @@ import torch.nn as nn
 
 """# BACKBONE """
 
+"""# UTILS """
+def get_activation(activation_name):
+    """
+    Get the activation function by name.
+
+    Args:
+        activation_name (str): Name of the activation function (e.g., 'relu', 'sigmoid', 'tanh').
+
+    Returns:
+        torch.nn.Module: The corresponding activation function.
+
+    Raises:
+        ValueError: If the activation name is not recognized.
+    """
+    if activation_name is None:
+        activation_name = "none"
+
+    activations = {
+        "relu": torch.nn.ReLU(),
+        "sigmoid": torch.nn.Sigmoid(),
+        "tanh": torch.nn.Tanh(),
+        "softmax": torch.nn.Softmax(dim=-1),
+        "leaky_relu": torch.nn.LeakyReLU(),
+        "elu": torch.nn.ELU(),
+        "selu": torch.nn.SELU(),
+        "gelu": torch.nn.GELU(),
+        "softplus": torch.nn.Softplus(),
+        "none": torch.nn.Identity()  # No activation
+    }
+
+    if activation_name.lower() not in activations:
+        raise ValueError(f"Unsupported activation function: {activation_name}. "
+                        f"Supported activations are: {list(activations.keys())}")
+
+    return activations[activation_name.lower()]
+
 class ConvNet(nn.Module):
     """
     A simple convolutional neural network (ConvNet) for processing input data.
     This network consists of three convolutional layers, each followed by an average pooling layer.
     The final output is flattened and passed through a fully connected layer to produce the output of size `p`.
     """
-    def __init__(self, input_channels, input_size, p=64):
+    def __init__(self, input_channels, input_size, p=64, activation = "relu", activation_in_the_end = None):
         """
         Initialize an instance of the ConvNet class.
 
@@ -32,6 +68,8 @@ class ConvNet(nn.Module):
         self.avgpool3 = nn.AvgPool2d(kernel_size=2, stride=2, padding=1)
         self.final_size = p * 9 * 9
         self.fc1 = nn.Linear(self.final_size, p)
+        self.activation = get_activation(activation)
+        self.activation_in_the_end = get_activation(activation_in_the_end)
         """
         for name, param in backbone.named_parameters():
             if param.requires_grad:
@@ -39,19 +77,19 @@ class ConvNet(nn.Module):
         """
 
     def forward(self, x):
-        x = self.avgpool1(nn.functional.relu(self.conv1(x)))
-        x = self.avgpool2(nn.functional.relu(self.conv2(x)))
-        x = self.avgpool3(nn.functional.relu(self.conv3(x)))
+        x = self.avgpool1(self.activation(self.conv1(x)))
+        x = self.avgpool2(self.activation(self.conv2(x)))
+        x = self.avgpool3(self.activation(self.conv3(x)))
         x = torch.flatten(x, start_dim=1)
-        # x = nn.functional.relu(self.fc1(x))
         x = self.fc1(x)
+        x = self.activation_in_the_end(x)
         return x
 
 class MLP(nn.Module):
     """
     A simple two-layer fully connected neural network (MLP) for processing input data.
     """
-    def __init__(self, input_channels, input_size, p=64):
+    def __init__(self, input_channels, input_size, p=64, activation = "relu", activation_in_the_end = None):
         """
         Initialize the MLP class.
         Args:
@@ -65,13 +103,15 @@ class MLP(nn.Module):
         super(MLP, self).__init__()
         self.fc1 = nn.Linear(input_channels * input_size * input_size, p)
         self.fc2 = nn.Linear(p, p)
+        self.activation = get_activation(activation)
+        self.activation_in_the_end = get_activation(activation_in_the_end)
     
     def forward(self, x):
         x = torch.flatten(x, start_dim=1)
-        x = nn.functional.relu(self.fc1(x))
-        x = nn.functional.relu(self.fc2(x))
+        x = self.activation(self.fc1(x))
+        x = self.fc2(x)
+        x = self.activation_in_the_end(x)
         return x
-
 
 def get_backbone(cfg):
     """
@@ -97,10 +137,12 @@ def get_backbone(cfg):
 
     p = cfg.p if hasattr(cfg, 'p') else 64
     data_channels = cfg.data_channels if hasattr(cfg, 'data_channels') else 3
+    activation = cfg.activation if hasattr(cfg, 'activation') else "relu"
+    activation_in_the_end = cfg.activation_in_the_end if hasattr(cfg, 'activation_in_the_end') else None
     if cfg.backbone_type == 'ConvNet':
-        backbone = ConvNet(data_channels, p)
+        backbone = ConvNet(data_channels, p, activation=activation, activation_in_the_end=activation_in_the_end)
     elif cfg.backbone_type == 'MLP':
-        backbone = MLP(data_channels, cfg.data_size, p)
+        backbone = MLP(data_channels, cfg.data_size, p, activation=activation, activation_in_the_end=activation_in_the_end)
     elif cfg.backbone_type == 'ResNet34':
         import torchvision.models as torchmodels
         backbone = torchmodels.resnet34(pretrained=cfg.backbone_pretrained)

@@ -416,6 +416,8 @@ def wandb_init(cfg):
     wandb.define_metric("train/*", step_metric="train/epoch")
     wandb.define_metric("test/epoch")
     wandb.define_metric("test/*", step_metric="test/epoch")
+    wandb.define_metric("layers/epoch")
+    wandb.define_metric("layers/*", step_metric="layers/epoch")
 
 def log(wandb_log, metrics = None, time = None, time_metric=None, specific_key = None, evaluated = False, prefix = "train", particular_metric_key = None, particular_metric_value = None, figure_img = None, figure_summary = None):
     if not wandb_log:
@@ -575,6 +577,13 @@ def empty_metrics():
         "vi/u_sig": [],
         "vi/sig": []
     }
+    return metrics
+
+def empty_grads_norm_metrics(model):
+    metrics = {}
+    for name, param in model.named_parameters():
+        metrics[f"gradient_{name}"] = []
+        metrics[f"norm_{name}"] = []
     return metrics
 
 def default_config():

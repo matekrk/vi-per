@@ -14,6 +14,7 @@ from utils import create_model, create_optimizer_scheduler, empty_grads_norm_met
     empty_metrics, default_config, \
     evaluate, compute_confusion_matrix, wandb_init, log
 from plot_results import plot_summary
+from collections import defaultdict
 
 default_config = default_config()
 
@@ -103,6 +104,8 @@ def train(cfg):
     log(cfg.wandb, time=0, particular_metric_key="best/test_mean_ece", particular_metric_value = best_test_mean_ece)
 
     metrics = empty_metrics()
+    grads_norm_metrics = empty_grads_norm_metrics(model)
+    metrics.update(grads_norm_metrics)
     epochs_eval = []
 
     for epoch in range(cfg.n_epochs):
@@ -112,6 +115,7 @@ def train(cfg):
 
         grad_norm_accum = 0.0
         param_norm_accum = 0.0
+        norm_grad_epoch_dict = defaultdict(list)
 
         epoch_loss = 0
         model.train()
@@ -127,10 +131,12 @@ def train(cfg):
             if test_evaluate:
                 grad_norm = 0.0
                 param_norm = 0.0
-                for param in model.parameters():
+                for name, param in model.named_parameters():
                     if param.grad is not None:
                         grad_norm += param.grad.norm().item() ** 2
                         param_norm += param.data.norm().item() ** 2
+                        norm_grad_epoch_dict[f"gradient_{name}"].append(param.grad.norm().item())
+                        norm_grad_epoch_dict[f"norm_{name}"].append(param.data.norm().item())
                 grad_norm_accum += grad_norm ** 0.5
                 param_norm_accum += param_norm ** 0.5
 
@@ -160,6 +166,13 @@ def train(cfg):
 
             metrics["param_norm"].append(param_norm_avg)
             log(cfg.wandb, metrics, epoch, specific_key="param_norm")
+
+            if verbose:
+                print("saved from that many param groups", len(norm_grad_epoch_dict.keys()))
+            for name in norm_grad_epoch_dict.keys():
+                metrics[name].append(sum(norm_grad_epoch_dict[name]) / len(data_loader))
+                metrics[name].append(sum(norm_grad_epoch_dict[name]) / len(data_loader))
+                log(cfg.wandb, metrics, epoch, specific_key=name, prefix="layers")
 
             epochs_eval.append(epoch)
             print("Train evaluation")

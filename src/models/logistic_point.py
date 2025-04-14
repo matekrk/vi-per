@@ -41,15 +41,15 @@ class LogisticPointwise(LLModel):
         self.loss = nn.BCELoss(reduction='mean')
 
         if prior_mu is None:
-            self.prior_mu_list = [torch.zeros(self.p, dtype=torch.double) for k in range(self.K)]
+            self.prior_mu_list = nn.ParameterList([nn.Parameter(torch.zeros(self.p, dtype=torch.double), requires_grad=prior_mean_learnable) for k in range(self.K)])
         else:
             assert isinstance(prior_mu, torch.Tensor), "mu must be a torch.Tensor"
             assert prior_mu.shape[0] == self.K, f"mu must have shape ({self.K}, p)"
             # assert prior_mu.shape[1] == self.p, f"mu must have shape ({self.K}, {self.p})" turn off for CC
-            self.prior_mu_list = [prior_mu[k] for k in range(self.K)]
+            self.prior_mu_list = nn.ParameterList([nn.Parameter(prior_mu[k], requires_grad=prior_mean_learnable) for k in range(self.K)])
 
         if prior_Sig is None:
-            self.prior_Sig_list = [torch.eye(self.p, dtype=torch.double) for _ in range(self.K)]
+            self.prior_Sig_list = nn.ParameterList([nn.Parameter(torch.eye(self.p, dtype=torch.double), requires_grad=prior_scale_learnable) for k in range(self.K)])
         else:
             assert isinstance(prior_Sig, torch.Tensor) or isinstance(prior_Sig, list), "Sig must be a list of tensors"
             if isinstance(prior_Sig, torch.Tensor):
@@ -60,10 +60,13 @@ class LogisticPointwise(LLModel):
                 for i, sig in enumerate(prior_Sig):
                     assert isinstance(sig, torch.Tensor), f"Sig[{i}] must be a torch.Tensor"
                     # assert sig.shape == (self.p, self.p), f"Sig[{i}] must have shape ({self.p}, {self.p})" # turn off for CC
-            self.prior_Sig_list = prior_Sig
+
+            self.prior_Sig_list = nn.ParameterList([nn.Parameter(prior_Sig[k], requires_grad=prior_scale_learnable) for k in range(self.K)])
+        self.prior_mean_learnable = prior_mean_learnable
+        self.prior_scale_learnable = prior_scale_learnable
 
         if m_init is None:
-            self.m_list = [nn.Parameter(torch.randn(self.p, dtype=torch.double)) for _ in range(self.K)]
+            self.m_list = nn.ParameterList([nn.Parameter(torch.randn(self.p, dtype=torch.double)) for _ in range(self.K)])
         else:
             assert isinstance(m_init, torch.Tensor) or isinstance(m_init, list), "m_init must be a torch.Tensor or list of torch.Tensor"
             assert len(m_init) == self.K, f"m_init must contain {self.K} tensors"
@@ -74,7 +77,7 @@ class LogisticPointwise(LLModel):
                 for i, m in enumerate(m_init):
                     assert isinstance(m, torch.Tensor), f"m_init[{i}] must be a torch.Tensor"
                     assert m.shape == (self.p,), f"m_init[{i}] must have shape ({self.p},)"
-            self.m_list = [nn.Parameter(m_init[:, k]) for k in range(self.K)]
+            self.m_list = nn.ParameterList([nn.Parameter(m_init[:, k]) for k in range(self.K)])
 
     
     def get_learnable_parameters(self):
@@ -319,32 +322,32 @@ class LogisticPointwiseCC(LLModelCC, LogisticPointwise):
         print(f"[LogisticPointwiseCC]")
 
         if m_init is None:
-            m_list = [nn.Parameter(torch.randn(self.p+val_k, dtype=torch.double)) for i_k, val_k in enumerate(self.chain_order)]
+            m_list = nn.ParameterList([nn.Parameter(torch.randn(self.p+val_k, dtype=torch.double), requires_grad=True) for val_k in self.chain_order])
         else:
             if isinstance(m_init, torch.Tensor):
-                m_list = []
+                m_list = nn.ParameterList()
                 for k in range(m_init.shape[1]):
                     m = m_init[:, k]
                     if m.shape[0] == self.p:
                         extended_m = torch.randn(self.p+self.chain_order[k], dtype=torch.double)
                         extended_m[:self.p+self.chain_order[k]] = m
-                        m_list.append(nn.Parameter(extended_m))
-                    elif m.shape[0] == self.p+self.K:
-                        m_list.append(nn.Parameter(m[:self.p+self.chain_order[k]]))
+                        m_list.append(nn.Parameter(extended_m, requires_grad=True))
+                    elif m.shape[0] == self.p+self.K or m.shape[0] == self.p+self.chain_order[k]:
+                        m_list.append(nn.Parameter(m[:self.p+self.chain_order[k]], requires_grad=True))
+                    else:
+                        raise ValueError(f"m_init[{k}] must have shape ({self.p},) or ({self.p + self.chain_order[k]},)")
             elif isinstance(m_init, list):
-                m_list = []
+                m_list = nn.ParameterList()
                 assert len(m_init) == self.K
                 for k, m in enumerate(m_init):
                     if m.shape[0] == self.p+self.chain_order[k]:
-                        m_list.append(nn.Parameter(m))
+                        m_list.append(nn.Parameter(m), requires_grad=True)
                     elif m.shape[0] == self.p:
                         extended_m = torch.randn(self.p+self.chain_order[k], dtype=torch.double)
                         extended_m[:self.p] = m
-                        m_list.append(nn.Parameter(extended_m))
+                        m_list.append(nn.Parameter(extended_m, requires_grad=True))
 
         self.m_list = m_list
-        for m in self.m_list:
-            m.requires_grad = True
     
     def forward(self, X_batch):
         """
@@ -363,17 +366,15 @@ class LogisticPointwiseCC(LLModelCC, LogisticPointwise):
             - "prediction": Use binary predictions (thresholded at 0.5) as intermediate outputs.
         """
         X_processed = self.process(X_batch)
-        X_processed = X_processed.to(torch.double)
-        m_list = [m.to(X_processed.device) for m in self.m_list]
         prev_list = []
         probabilities = []
         for i, k in enumerate(self.chain_order):
             if i == 0:
-                logit = (X_processed @ m_list[(self.chain_order == i).nonzero().item()]).to(X_processed.device)
+                logit = (X_processed @ self.m_list[(self.chain_order == i).nonzero().item()])
                 probability = torch.sigmoid(logit)
             else:
                 prev_cat = torch.cat(prev_list, dim=1)
-                logit = (torch.cat((X_processed, prev_cat), dim=1) @ m_list[(self.chain_order == i).nonzero().item()]).to(X_processed.device)
+                logit = (torch.cat((X_processed, prev_cat), dim=1) @ self.m_list[(self.chain_order == i).nonzero().item()])
                 probability = torch.sigmoid(logit)
             if self.chain_type == "logit":
                 prev_list.append(logit.unsqueeze(1))

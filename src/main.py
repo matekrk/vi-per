@@ -337,10 +337,15 @@ if __name__ == "__main__":
         except:
             print("Error in saving metrics_summary")
             for k, v in metrics_summary.items():
-                if isinstance(v, list):
-                    if isinstance(v[0], list):
-                        print(k, type(v[0][0]))
-                    else:
+                if isinstance(v, list) and len(v):
+                    try:
+                        if isinstance(v[0], list):
+                            print(k, type(v[0][0]))
+                        else:
+                            print(k, type(v[0]))
+                    except:
+                        print("Error in saving metrics_summary")
+                        print("Metric key", k, "Length", len(k))
                         print(k, type(v[0]))
                 else:
                     print(k, type(v))

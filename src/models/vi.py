@@ -395,7 +395,6 @@ class LogisticVI(LLModel):
                 expected_sigmoid = torch.sigmoid(M_corrected)
             else: # ref objective.py 142
                 S = torch.sqrt(torch.sum(X_batch_processed**2 * s**2, dim=1))
-                S = torch.sqrt(S)
                 norm = torch.distributions.Normal(loc=M, scale=S)
                 samples = norm.rsample(n_samples)
                 sigmoid_samples = torch.sigmoid(samples)

@@ -174,7 +174,7 @@ class LogisticPointwise(LLModel):
         log_prob = 0.
         for i, (m, prior_mu, prior_Sig) in enumerate(zip(self.m_list, self.prior_mu_list, self.prior_Sig_list)):
             try:
-                d = torch.distributions.MultivariateNormal(loc=prior_mu.to(m.device), covariance_matrix=prior_Sig.to(m.device))
+                d = torch.distributions.MultivariateNormal(loc=prior_mu, covariance_matrix=prior_Sig)
                 log_prob += d.log_prob(m)
             except:
                 print(f"Error in regularization for output {i}")

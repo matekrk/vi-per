@@ -201,7 +201,7 @@ class LogisticPointwise(LLModel):
 
         preds = []
         for i, m in enumerate(self.m_list):
-            pred = torch.sigmoid(X_processed @ m.to(X_processed.device))
+            pred = torch.sigmoid(X_processed @ m)
             preds.append(pred.unsqueeze(1))
 
         preds = torch.cat(preds, dim=1)

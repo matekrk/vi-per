@@ -308,7 +308,7 @@ def train(cfg):
     
     confusion_matrix = None
     if X_test is not None and y_test is not None:
-        confusion_matrix = compute_confusion_matrix(model, X_test, y_test, cfg.K, device, threshold=cfg.f1_thres)
+        confusion_matrix = compute_confusion_matrix(model, X_test, y_test, cfg.K, device, threshold=cfg.f1_thres, batchsize=cfg.batch_size)
     fig = plot_summary(cfg, metrics, epoch, epochs_eval, confusion_matrix)
     log(cfg.wandb, metrics, epoch, figure_summary=fig)
     return metrics

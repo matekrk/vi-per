@@ -335,11 +335,33 @@ def do_ece_single_attribute(y_test, y_pred, preds_one, confidences, num_bins=20)
     return ece, fig
     
 @torch.no_grad()
-def compute_confusion_matrix(model, X_test, y_test, K, device, threshold = 0.5):
+def compute_confusion_matrix(model, X_test, y_test, K, device, threshold = 0.5, batchsize = None):
     model.eval()
-    X_test = X_test.to(device)
-    y_test = y_test.to(device)
-    y_pred, preds = model.predict(X_test, threshold)
+    if batchsize is None:
+        X_test = X_test.to(device)
+        y_test = y_test.to(device)
+        y_pred, preds = model.predict(X_test, threshold)
+    else:
+        preds, y_preds, y_tests = [], [], []
+        for i in range(0, len(X_test), batchsize):
+            X_batch = X_test[i:i+batchsize]
+            y_batch = y_test[i:i+batchsize]
+            X_batch = X_batch.to(torch.double).to(device)
+            y_batch = y_batch.to(torch.double).to(device)
+            y_pred, batch_preds = model.predict(X_batch, threshold)
+            preds.append(batch_preds)
+            y_preds.append(y_pred)
+            y_tests.append(y_batch)
+
+        preds = torch.cat(preds, dim=0)
+        y_pred = torch.cat(y_preds, dim=0)
+        y_test = torch.cat(y_tests, dim=0)
+
+    assert y_pred.shape == y_test.shape, f"y_pred.shape={y_pred.shape} != y_test.shape={y_test.shape}"
+    assert y_pred.shape[1] == K, f"y_pred.shape[1]={y_pred.shape[1]} != K={K}"
+    assert len(preds) == len(y_test), f"len(preds)={len(preds)} != len(y_test)={len(y_test)}"
+    assert len(y_pred) == len(y_test), f"len(y_pred)={len(y_pred)} != len(y_test)={len(y_test)}"
+    
     confusion_matrix = torch.zeros(K, K)
     for i in range(K):
         for j in range(K):

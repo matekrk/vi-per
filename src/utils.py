@@ -60,8 +60,8 @@ def evaluate(model, test_dataloader, K, device, prefix = "", threshold = 0.5, ve
 
     with torch.no_grad():
         for X_batch, y_batch in test_dataloader:
-            X_batch = X_batch.to(device)
-            y_batch = y_batch.to(device)
+            X_batch = X_batch.to(torch.double).to(device)
+            y_batch = y_batch.to(torch.double).to(device)
             y_pred, batch_preds = model.predict(X_batch, threshold)
             preds.append(batch_preds)
             y_preds.append(y_pred)

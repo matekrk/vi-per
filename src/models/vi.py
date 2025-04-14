@@ -136,17 +136,17 @@ class LogisticVI(LLModel):
 
         # Initialize variational parameters
         if m_init is None:
-            self.m_list = [torch.randn(self.p, dtype=torch.double) * posterior_mean_init_scale for _ in range(K)]
+            self.m_list = nn.ParameterList([torch.randn(self.p, dtype=torch.double) * posterior_mean_init_scale for _ in range(K)])
         else:
             assert isinstance(m_init, torch.Tensor), "m_init must be a torch.Tensor"
             assert m_init.shape == (self.K, self.p), f"m_init must have shape ({self.K}, {self.p})"
-            self.m_list = [m_init[val_k, :] for val_k in range(self.K)]
+            self.m_list = nn.ParameterList([m_init[val_k, :] for val_k in range(self.K)])
 
         if s_init is None:
             if method in [0, 4]:
-                self.u_list = [torch.tensor([-1.0 + posterior_var_init_add] * self.p, dtype=torch.double) for _ in range(self.K)]
+                self.u_list = nn.ParameterList([torch.tensor([-1.0 + posterior_var_init_add] * self.p, dtype=torch.double) for _ in range(self.K)])
             elif method in [1, 5]:
-                self.u_list = []
+                self.u_list = nn.ParameterList([])
                 for _ in range(self.K):
                     u = torch.ones(int(self.p * (self.p + 1) / 2), dtype=torch.double) * (1.0 / self.p)
                     u.requires_grad = True
@@ -156,17 +156,11 @@ class LogisticVI(LLModel):
                 assert isinstance(s_init, torch.Tensor), "s_init must be a torch.Tensor"
                 assert s_init.shape == (self.K, self.p), f"s_init must have shape ({self.K}, {self.p})"
                 self.s_list = [s_init[i_k, :] for i_k in range(self.K)]
-                self.u_list = [torch.log(s) for s in self.s_list]
+                self.u_list = nn.ParameterList([torch.log(s) for s in self.s_list])
             elif method in [1, 5]:
                 assert isinstance(s_init, torch.Tensor), "s_init must be a torch.Tensor"
                 assert s_init.shape == (self.K, self.p * (self.p + 1) // 2), f"s_init must have shape ({self.K}, {self.p * (self.p + 1) // 2})"
-                self.u_list = [s_init[i_k, :] for i_k in range(self.K)]
-
-        # Set requires_grad=True for variational parameters
-        for m in self.m_list:
-            m.requires_grad = True
-        for u in self.u_list:
-            u.requires_grad = True
+                self.u_list = nn.ParameterList([s_init[i_k, :] for i_k in range(self.K)])
 
         # Initialize l_terms for adaptive l
         if adaptive_l:
@@ -575,13 +569,13 @@ class LogisticVICC(LLModelCC, LogisticVI):
                         m_list.append(nn.Parameter(extended_m))
                     else:
                         raise ValueError(f"m_init[{i_k}] has wrong shape {m.shape}")
-        self.m_list = m_list
+        self.m_list = nn.ParameterList(m_list)
 
         if s_init is None:
             if method in [0, 4]:
-                self.u_list = [torch.tensor([-1.0 + posterior_var_init_add] * (self.p+self.chain_order[i_k]), dtype=torch.double) for i_k in range(self.K)]
+                self.u_list = nn.ParameterList([nn.Parameter(torch.tensor([-1.0 + posterior_var_init_add] * (self.p+self.chain_order[i_k]), dtype=torch.double)) for i_k in range(self.K)])
             elif method in [1, 5]:
-                self.u_list = []
+                self.u_list = nn.ParameterList([])
                 for i_k in range(self.K):
                     u = torch.ones(int((self.p+self.chain_order[i_k]) * (self.p+self.chain_order[i_k] + 1) / 2), dtype=torch.double) * (1.0 / (self.p+self.chain_order[i_k]))
                     u.requires_grad = True
@@ -615,7 +609,7 @@ class LogisticVICC(LLModelCC, LogisticVI):
                 self.s_list = s_list
                 self.u_list = [torch.log(s) for s in self.s_list]
             elif method in [1, 5]:
-                s_list = []
+                u_list = nn.ParameterList([])
                 if isinstance(s_init, torch.Tensor):
                     assert s_init.shape[0] == self.K, f"s_init.shape[0]={s_init.shape[0]} != {self.K}"
                     for i_k in range(s_init.shape[0]):
@@ -623,29 +617,23 @@ class LogisticVICC(LLModelCC, LogisticVI):
                         if len(s) == int(self.p * (self.p + 1) / 2):
                             extended_s = torch.ones(int((self.p + self.chain_order[i_k]) * (self.p + self.chain_order[i_k] + 1) / 2), dtype=torch.double) * (1.0 / (self.p + self.chain_order[i_k]))
                             extended_s[:len(s)] = s
-                            s_list.append(extended_s)
+                            u_list.append(extended_s)
                         elif len(s) == int((self.p + self.chain_order[i_k]) * (self.p + self.chain_order[i_k] + 1) / 2):
-                            s_list.append(s)
+                            u_list.append(s)
                         else:
                             raise ValueError(f"s_init[{i_k}] has wrong shape {s.shape}")
                 elif isinstance(s_init, list):
                     assert len(s_init) == self.K
                     for i_k, s in enumerate(s_init):
                         if len(s) == int((self.p + self.chain_order[i_k]) * (self.p + self.chain_order[i_k] + 1) / 2):
-                            s_list.append(s)
+                            u_list.append(s)
                         elif len(s) == int(self.p * (self.p + 1) / 2):
                             extended_s = torch.ones(int((self.p + self.chain_order[i_k]) * (self.p + self.chain_order[i_k] + 1) / 2), dtype=torch.double) * (1.0 / (self.p + self.chain_order[i_k]))
                             extended_s[:len(s)] = s
-                            s_list.append(extended_s)
+                            u_list.append(extended_s)
                         else:
                             raise ValueError(f"s_init[{i_k}] has wrong shape {s.shape}")
-                self.u_list = s_list # ??
-
-        # Set requires_grad=True for variational parameters
-        for m in self.m_list:
-            m.requires_grad = True
-        for u in self.u_list:
-            u.requires_grad = True
+        self.u_list = nn.ParameterList(self.u_list)
 
     def get_learnable_parameters(self):
         params = nn.ParameterList(self.m_list + self.u_list)

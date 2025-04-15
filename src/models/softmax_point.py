@@ -1,381 +1,236 @@
 import torch
+from .generic import LLModel
 import torch.nn as nn
-import torch.nn.functional as F
-from .generic import LLModel, LLModelCC
 
-"""## Softmax-pointwise model"""
-class SoftmaxPointwise(LLModel):
-    def __init__(self, p, K, beta=0.0, num_classes_lst=None, intercept=False, backbone=None):
+class SoftmaxModel(LLModel):
+
+    NUM_PER_OUTPUT = 2
+    
+    """
+    Softmax-based pointwise model for multi-class classification tasks.
+    Supports independent outputs or a chain of classifiers and integrates with a backbone network if provided.
+    """
+    def __init__(self, p, K, num_classes_lst=None, beta=1.0, intercept=False, backbone=None, chain_type="logit", chain_order=None, nums_per_output=NUM_PER_OUTPUT):
         """
-        Initialize an instance of the SoftmaxPointwise class.
+        Initialize the SoftmaxModel.
 
         Args:
             p (int): Dimensionality of the input features after processing by the backbone network.
             K (int): Number of outputs (attributes).
-            beta (float, optional): Regularization parameter. Defaults to 0.0. For pointwise variant, equivalent to L2 regularization.
             num_classes_lst (list of int, optional): Number of classes for each output. Defaults to None (binary classification for all outputs).
+            beta (float, optional): Regularization parameter. Defaults to 1.0.
             intercept (bool, optional): Whether to include an intercept term in the model. Defaults to False.
-            backbone (torch.nn.Module, optional): Backbone network to transform input features. Defaults to None (no preprocessing).
+            backbone (torch.nn.Module, optional): Backbone network to transform input features. Defaults to None.
+            chain (bool, optional): Whether to use a chain of classifiers. Defaults to False.
+            chain_type (str, optional): Type of the chain. Must be one of ["logit", "probability", "prediction", "ground_truth"]. Defaults to "logit".
+            chain_order (list or torch.Tensor, optional): Order of the chain. Defaults to sequential order.
+            nums_per_output (int, optional): Number of outputs for each output. Defaults to 2 (binary classification, softmax).
 
         Notes:
-            - If `num_classes_lst` is not provided, the model assumes binary classification for all outputs.
+            - If `num_classes_lst` is not provided, binary classification (2 classes) is assumed for all outputs.
             - The `backbone` parameter allows for feature extraction or transformation before applying the model's heads.
+            - If `chain` is True, the outputs of one classifier are used as inputs to the next.
         """
-        p = super().__init__(p, K, beta=beta, intercept=intercept, backbone=backbone)
-        print(f"[SoftmaxPointwise]")
-        if num_classes_lst is None:
-            self.num_classes_single = 2
-            self.num_classes_lst = [self.num_classes_single] * self.K
-        else:
-            self.num_classes_single = num_classes_lst[0]
-            self.num_classes_lst = num_classes_lst
+        p_adjusted = super().__init__(p, K, beta, intercept, backbone, chain_order, chain_type, nums_per_output)
+        print(f"[SoftmaxPointwiseModel] input_dim={p_adjusted} output_dim={K} beta={beta} chain_type={chain_type} chain_type={chain_type}")
 
-        self.heads = nn.ModuleList([self.make_output_layer(num_classes=self.num_classes_lst[k]) for k in range(self.K)])
+        self.chain = self.chain_order is not None
         self.loss = nn.CrossEntropyLoss(reduction='mean')
 
-    def get_learnable_parameters(self):
-        params = []
-        if self.backbone is not None:
-            params += list(self.backbone.parameters())
-        for head in self.heads:
-            params += list(head.parameters())
-        return nn.ParameterList(params)
+        # Initialize number of classes for each output
+        if num_classes_lst is None:
+            self.num_classes_lst = [2] * K
+            # Default to binary classification. 
+            # Assume 2 classes for each output.
+            # And at least for now the same number of classes for each output.
+        else:
+            assert len(num_classes_lst) == K, f"num_classes_lst must have length K={K}."
+            self.num_classes_lst = num_classes_lst
 
-    def make_output_layer(self, num_classes):
-        return nn.Linear(self.p, num_classes).to(torch.double)
+        # Define output layers (one per output)
+        self.heads = nn.ModuleList([self._make_output_layer(p_adjusted, num_classes) for num_classes in self.num_classes_lst])
+        self.loss = nn.CrossEntropyLoss(reduction='mean')
 
-    # FIXME: is that regularization is ok?
-    def regularization(self):
+        # TODO: add custom initialization
+
+    def _make_output_layer(self, input_dim, num_classes):
         """
-        Compute the L2 regularization term.
+        Create a linear output layer for a given number of classes.
+
+        Args:
+            input_dim (int): Dimensionality of the input features.
+            num_classes (int): Number of classes for the output.
+
+        Returns:
+            nn.Module: A linear layer for the output.
         """
-        log_prob = 0.0
-        for head in self.heads:
-               for param in head.parameters():
-                    log_prob += torch.sum(param**2)
-        return log_prob
+        return nn.Linear(input_dim, num_classes).to(torch.double)
+
+    def get_learnable_parameters(self, named=True):
+        """
+        Get learnable parameters of the model.
+
+        Args:
+            named (bool, optional): Whether to return named parameters. Defaults to True.
+
+        Returns:
+            nn.ParameterList: List of learnable parameters.
+        """
+        if named:
+            named_params = []
+            if self.backbone:
+                named_params.extend(self.backbone.named_parameters())
+            for i, head in enumerate(self.heads):
+                named_params.extend((f"head_{i}", param) for param in head.parameters())
+            return named_params
+        else:
+            params = []
+            if self.backbone:
+                params.extend(self.backbone.parameters())
+            for head in self.heads:
+                params.extend(head.parameters())
+            return params
+
+    def forward(self, X_batch, y_batch=None):
+        """
+        Perform a forward pass through the model.
+
+        Args:
+            X_batch (torch.Tensor): Input batch of data with shape (batch_size, input_dim).
+            y_batch (torch.Tensor, optional): Ground truth labels for the batch. Required if chain_type is "ground_truth".
+
+        Returns:
+            torch.Tensor: Logits for each output with shape (batch_size, K, max_num_classes).
+        """
+        X_processed = self.process(X_batch)
+        logits = []
+        prev_list = []
+
+        for i_k, head in enumerate(self.heads):
+            if self.chain:
+                X_current = self.chain_order.process_chain(X_processed, prev_list, i_k)
+            else:
+                X_current = X_processed
+
+            logit = head(X_current)
+            logits.append(logit.unsqueeze(1))
+
+            if self.chain:
+                y = y_batch[:, i_k] if y_batch is not None else None
+                prev_list = self.chain_order.update_chain(prev_list, logit, torch.softmax(logit, dim=-1), y)
+
+        logits = torch.cat(logits, dim=1)
+        return logits
 
     def train_loss(self, X_batch, y_batch, data_size=None, verbose=False):
         """
-        Compute the training loss for a batch of data using CrossEntropy for pointwise classification.
+        Compute the training loss.
 
         Args:
-            X_batch (torch.Tensor): Input batch of features with shape (batch_size, num_features).
-            y_batch (torch.Tensor): Corresponding batch of target labels with shape (num_heads, batch_size).
-            data_size (int, optional): Total size of the dataset. Defaults to the size of `X_batch`.
-            verbose (bool, optional): If True, prints detailed loss information for each head and regularization loss. Defaults to False.
+            X_batch (torch.Tensor): Batch of input data.
+            y_batch (torch.Tensor): Batch of target variables.
+            data_size (int, optional): Total size of the dataset. Defaults to None.
+            verbose (bool, optional): Whether to print loss details. Defaults to False.
 
         Returns:
-            torch.Tensor: The total loss, including the sum of individual head losses and the regularization loss.
-
-        Notes:
-            - The method processes the input features using the `process` method before computing the loss.
-            - The loss for each head is computed using the `loss` function, and the total loss is the sum of all head losses.
-            - If regularization is enabled (i.e., `self.beta` is non-zero), a regularization loss is added to the total loss.
-            - The method ensures that the loss for each head is a scalar tensor.
+            torch.Tensor: The computed training loss.
         """
         data_size = data_size or X_batch.shape[0]
-        X_processed = self.process(X_batch)
-
+        logits = self.forward(X_batch, y_batch)
         total_loss = 0.0
 
-        for i, (head,y) in enumerate(zip(self.heads,y_batch.T)):
-            pred = head(X_processed)
-            loss_head = self.loss(pred, y.to(torch.long))
-            assert loss_head.shape == torch.Size([]), f"loss_head.shape={loss_head.shape} != ()" # loss_head.ndim == 0 alternatively
+        for i, (logit, y) in enumerate(zip(logits.transpose(1, 0), y_batch.T)):
+            loss_head = self.loss(logit, y.to(torch.long))
             total_loss += loss_head
             if verbose:
-                print(f"head={i} loss={loss_head:.2f}")
+                print(f"[Train Loss] Head {i}: {loss_head.item()}")
 
-        reg_loss = self.regularization() if self.beta else torch.tensor(0.0, dtype=torch.double, device=X_batch.device)
+        reg_loss = self.regularization() / data_size if self.beta else torch.tensor(0.0, device=logits.device)
         if verbose:
-            print(f"reg_loss={reg_loss:.2f}")
-        total_loss += self.beta * reg_loss
+            print(f"[Train Loss] Regularization: {reg_loss.item()}")
+        return total_loss + self.beta * reg_loss
 
-        return total_loss
-
-    @torch.no_grad()
-    def test_loss(self, X_batch, y_batch, data_size=None, verbose=False, other_beta=None):
+    def regularization(self):
         """
-        Compute the test loss for a batch of data.
-
-        Args:
-            X_batch (torch.Tensor): Input batch of features with shape (batch_size, num_features).
-            y_batch (torch.Tensor): Corresponding batch of target labels with shape (num_heads, batch_size).
-            data_size (int, optional): Total size of the dataset. Defaults to the size of `X_batch`.
-            verbose (bool, optional): If True, prints detailed loss information for each head and regularization loss. Defaults to False.
-            other_beta (float, optional): Alternative regularization parameter for testing. Defaults to None (uses `self.beta`).
+        Compute the L2 regularization term.
 
         Returns:
-            torch.Tensor: The total test loss, including the sum of individual head losses and the regularization loss.
-
-        Notes:
-            - This method is a reference to `train_loss` and computes the loss in the same way.
-            - The `other_beta` parameter allows for testing with a different regularization strength.
+            torch.Tensor: The computed regularization term as a scalar tensor.
         """
-        return self.train_loss(X_batch, y_batch, data_size, verbose)
-
-    def forward(self, X_batch):
-        """
-        Compute logits for each output given input data.
-
-        Parameters:
-        ----------
-        X_batch : torch.Tensor
-            Input data. Shape (n_samples, input_dim).
-
-        Returns:
-        -------
-        preds : torch.Tensor
-            Predicted probabilities for each output. Shape (n_samples, K, C).
-        """
-        X_processed = self.process(X_batch)
-
-        logits = []
+        reg_loss = 0.0
         for head in self.heads:
-            logit = head(X_processed)
-            logits.append(logit)
-            
-        logits = torch.stack(logits, dim=1)
-        assert logits.shape == (X_batch.shape[0], self.K, self.num_classes_single), f"logits.shape={logits.shape} != (X_batch.shape[0], {self.K}, {self.num_classes_single})"
-        return logits
+            for param in head.parameters():
+                reg_loss += torch.sum(param ** 2)
+        return reg_loss
 
     @torch.no_grad()
-    def predict(self, X_batch, threshold=None):
+    def predict(self, X_batch, threshold = None):
         """
-        Predict the class for each output given the input data.
+        Predict class probabilities and class labels for the input data.
+
         Args:
-            X_batch (torch.Tensor): Input data with shape (n_samples, input_dim), 
-                where `n_samples` is the number of samples and `input_dim` is the dimensionality of the input features.
-            threshold (float, optional): Threshold for binary classification. 
-                Currently inactive and defaults to None.
+            X_batch (torch.Tensor): Input data.
+
         Returns:
             tuple: A tuple containing:
-            - out (torch.Tensor): Predicted classes for each output with shape (n_samples, K), 
-              where `K` is the number of outputs.
-            - logits (torch.Tensor): Raw logits produced by the model with shape (n_samples, K, num_classes).
-        Raises:
-            AssertionError: If the shape of intermediate or final outputs does not match the expected dimensions.
-        Notes:
-            - The method processes the input data through the model to compute logits, 
-              then determines the predicted class for each output by selecting the class with the highest score.
-            - The `threshold` parameter is currently not used and is reserved for future binary classification use cases.
+                - torch.Tensor: Predicted class labels with shape (batch_size, K).
+                - torch.Tensor: Predicted probabilities with shape (batch_size, K, max_num_classes).
         """
         logits = self.forward(X_batch)
-        all_preds = []
-        for i in range(self.K):
-            max_class = torch.argmax(logits[:, i, :], dim=-1)
-            assert max_class.shape == torch.Size([X_batch.shape[0]])
-            all_preds.append(max_class)
-        out = torch.stack(all_preds, dim=1)
-        assert out.shape == (X_batch.shape[0], self.K), f"out.shape={out.shape} != (X_batch.shape[0], {self.K})"
-        return out, logits
+        probs = torch.softmax(logits, dim=-1)
+        preds = torch.argmax(probs, dim=-1)
+        return preds, probs
     
-    def get_confidences(self, preds):
-        """
-        Compute the confidence scores for the given predictions.
-        Args:
-            preds (torch.Tensor): A tensor containing the predictions, where the last dimension 
-                      represents the class probabilities.
-        Returns:
-            torch.Tensor: A tensor containing the maximum confidence score for each prediction 
-                  along the last dimension.
-        """
-
-        return torch.max(preds, dim=-1)[0]
-
     def compute_negative_log_likelihood(self, X_batch, y_batch, mc=True):
         """
         Compute the negative log likelihood (NLL) for the given data and predictions.
 
         Args:
-            X_batch (torch.Tensor): Input data with shape (n_samples, input_dim), 
-                where `n_samples` is the number of samples and `input_dim` is the dimensionality of the input features.
-            y_batch (torch.Tensor): Target variables with shape (n_samples, K), 
-                where `K` is the number of outputs (attributes).
+            X_batch (torch.Tensor): Input data with shape (n_samples, input_dim).
+            y_batch (torch.Tensor): Target variables with shape (n_samples, K).
             mc (bool, optional): Whether to use Monte Carlo estimation. Currently inactive. Defaults to True.
 
         Returns:
             torch.Tensor: A tensor containing the negative log likelihood for each output (attribute).
-
-        Notes:
-            - The method computes the NLL for each output using the CrossEntropy loss.
-            - The logits for each output are processed through a softmax function to compute probabilities.
-            - The NLL is calculated as the negative sum of the log probabilities of the true classes.
-            - The method ensures that the NLL for each output is a scalar tensor.
         """
         logits = self.forward(X_batch)
         nlls = []
         for val_k in range(self.K):
-            relevant_head = val_k
-            y = y_batch.T[relevant_head]
-            logit = logits[:, relevant_head, :]
-            probabilities = F.softmax(logit, dim=1)
-            true_class_probs = probabilities.gather(1, y.unsqueeze(1).to(torch.long)).squeeze().to(torch.float)
-            assert true_class_probs.shape == torch.Size([X_batch.shape[0]]), f"true_class_probs.shape"
+            y = y_batch.T[val_k]
+            logit = logits[:, val_k, :]
+            probabilities = torch.softmax(logit, dim=1)
+            true_class_probs = probabilities.gather(1, y.unsqueeze(1).to(torch.long)).squeeze()
             log_likelihood = torch.log(true_class_probs)
             nll = -log_likelihood.sum()
-            assert nll.shape == torch.Size([]), f"nll.shape={nll.shape} != ()"
             nlls.append(nll)
         return torch.stack(nlls)
 
-
-""" # Softmax-pointwise CC model """
-class SoftmaxPointwiseCC(LLModelCC, SoftmaxPointwise):
-    def __init__(self, p, K, beta=0.0, intercept=False, backbone=None, num_classes_lst=None, chain_order=None, chain_type="logit"):
+    def get_confidences(self, preds):
         """
-        Initialize an instance of the SoftmaxPointwiseCC class.
+        Compute the confidence scores for the given predictions.
 
         Args:
-            p (int): Dimensionality of the input features after processing by the backbone network.
-            K (int): Number of outputs (attributes).
-            beta (float, optional): Regularization parameter. Defaults to 0.0. For the pointwise variant, equivalent to L2 regularization.
-            intercept (bool, optional): Whether to include an intercept term in the model. Defaults to False.
-            backbone (torch.nn.Module, optional): Backbone network to transform input features. Defaults to None (no preprocessing).
-            num_classes_lst (list of int, optional): Number of classes for each output. Defaults to None (binary classification for all outputs).
-            chain_order (list of int, optional): Order of the chain for the outputs. Defaults to None (sequential order from 0 to K-1).
-            chain_type (str, optional): Type of the chain structure. Must be one of ["logit", "probability", "prediction"]. Defaults to "logit".
-
-        Raises:
-            AssertionError: If the length of `chain_order` does not match the number of outputs `K`.
-
-        Notes:
-            - The `chain_order` parameter determines the sequence in which the outputs are processed. 
-              By default, it is a sequential list from 0 to K-1.
-            - The `chain_type` parameter specifies how the chain is interpreted or used in the model. 
-              For example, "logit" uses raw logits, "probability" uses softmax probabilities, and "prediction" uses the predicted class.
-            - The `num_classes_lst` parameter allows specifying the number of classes for each output. 
-              If not provided, binary classification is assumed for all outputs.
-        """
-        LLModelCC.__init__(self, p, K, beta=beta, intercept=intercept, backbone=backbone, chain_order=chain_order, chain_type=chain_type)
-        SoftmaxPointwise.__init__(self, p, K, beta=beta, intercept=intercept, backbone=backbone, num_classes_lst=num_classes_lst)
-        print(f"[SoftmaxPointwiseCC] chain_order={self.chain_order} chain_type={self.chain_type}")
-
-        if num_classes_lst is None:
-            self.num_classes_lst = [2] * self.K  # Default to binary classification for each head
-        else:
-            self.num_classes_lst = num_classes_lst
-
-        self.heads = nn.ModuleList([self.make_output_layer(in_features=self.p+sum(self.num_classes_lst[:k]), num_classes=self.num_classes_lst[k]) for k in range(self.K)])
-        self.heads = nn.ModuleList([self.heads[(self.chain_order == i_k).nonzero().item()] for i_k, val_k in enumerate(self.chain_order)])
-        self.loss = nn.CrossEntropyLoss(reduction='mean')
-
-    def make_output_layer(self, num_classes, in_features=None):
-        if in_features is None:
-            in_features = self.p
-        return nn.Linear(in_features, num_classes).to(torch.double)
-
-    def forward(self, X_batch):
-        """
-        Forward pass through the model to compute logits for each output.
-
-        Args:
-            X_batch (torch.Tensor): Input data with shape (n_samples, input_dim), 
-            where `n_samples` is the number of samples and `input_dim` is the dimensionality of the input features.
+            preds (torch.Tensor): A tensor containing the predictions, where the last dimension 
+                                represents the class probabilities.
 
         Returns:
-            torch.Tensor: A tensor containing the logits for each output with shape (n_samples, K, num_classes), 
-            where `K` is the number of outputs and `num_classes` is the number of classes for each output.
-
-        Notes:
-            - The method processes the input data through the backbone network (if provided) and then applies 
-              the chain structure to compute logits for each output sequentially.
-            - The chain structure allows each output to depend on the previous outputs, based on the specified `chain_type`.
-            - The `chain_type` parameter determines how the outputs are combined:
-            - "logit": Uses raw logits from the previous outputs.
-            - "probability": Uses softmax probabilities of the previous outputs.
-            - "prediction": Uses the predicted class of the previous outputs.
-            - The logits for all outputs are stacked along the second dimension to form the final output tensor.
+            torch.Tensor: A tensor containing the maximum confidence score for each prediction 
+                        along the last dimension.
         """
-        X_processed = self.process(X_batch)
-        prev_list = []
-        logits = []
-        for i_k, val_k in enumerate(self.chain_order):
-            if i_k == 0:
-                X = X_processed
-            else:
-                prev_cat = torch.cat(prev_list, dim=1)
-                X = torch.cat((X_processed, prev_cat), dim=1)
-            logit = self.heads[val_k](X)
-            logits.append(logit)
-            if self.chain_type == "logit":
-                prev_list.append(logit)
-            elif self.chain_type == "probability":
-                prev_list.append(F.softmax(logit, dim=1))
-            elif self.chain_type == "prediction":
-                prev_list.append(logit.argmax(dim=1))
-            # elif self.chain_type == "true":
-            #     prev_list.append(y_batch[:, k])
-        return torch.stack(logits, dim=1)
-    
-    def train_loss(self, X_batch, y_batch, data_size=None, verbose=False):
-        """
-        Compute the training loss for a batch of data using CrossEntropy for pointwise classification.
-
-        Args:
-            X_batch (torch.Tensor): Input batch of features with shape (batch_size, input_dim), 
-                where `batch_size` is the number of samples and `input_dim` is the dimensionality of the input features.
-            y_batch (torch.Tensor): Corresponding batch of target labels with shape (batch_size, K), 
-                where `K` is the number of outputs (attributes).
-            data_size (int, optional): Total size of the dataset. Defaults to the size of `X_batch`.
-            verbose (bool, optional): If True, prints detailed loss information for each head and regularization loss. Defaults to False.
-
-        Returns:
-            torch.Tensor: The total loss, including the sum of individual head losses and the regularization loss.
-
-        Notes:
-            - The method processes the input features using the `process` method before computing the loss.
-            - The loss for each head is computed using the `loss` function, and the total loss is the sum of all head losses.
-            - If regularization is enabled (i.e., `self.beta` is non-zero), a regularization loss is added to the total loss.
-            - The method ensures that the loss for each head is a scalar tensor.
-        """
-        data_size = data_size or X_batch.shape[0]
-        X_processed = self.process(X_batch)
-        total_loss = 0.
-        logits = []
-        for i_k, val_k in enumerate(self.chain_order):
-            if i_k == 0:
-                logit = self.heads[val_k](X_processed)
-                loss_head = self.loss(logit, y_batch.T[val_k].to(torch.long)) 
-            else:
-                prev_logits = torch.cat(logits, dim=1)
-                logit = self.heads[val_k](torch.cat((X_processed, prev_logits), dim=1))
-                loss_head = self.loss(logit, y_batch.T[val_k].to(torch.long))
-            assert logit.shape == torch.Size([X_batch.shape[0], self.num_classes_lst[val_k]]), f"logit.shape={logit.shape} != (X_batch.shape[0], {self.num_classes_lst[val_k]})"
-            assert loss_head.shape == torch.Size([]), f"loss_head.shape={loss_head.shape} != (1)"
-            logits.append(logit)
-            total_loss += loss_head
-            if verbose:
-                print(f"head={i_k} loss={loss_head:.2f}")
-
-        reg_loss = self.regularization() if self.beta else torch.tensor(0.0, dtype=torch.double, device=X_batch.device)
-        if verbose:
-            print(f"reg_loss={reg_loss:.2f}")
-        total_loss += self.beta * reg_loss
-
-        return total_loss
+        return torch.max(preds, dim=-1)[0]
 
     @torch.no_grad()
     def test_loss(self, X_batch, y_batch, data_size=None, verbose=False):
         """
         Compute the test loss for a batch of data.
 
-        This method is a reference to the `train_loss` method and computes the loss in the same way.
-
         Args:
-            X_batch (torch.Tensor): Input batch of features with shape (batch_size, input_dim), 
-            where `batch_size` is the number of samples and `input_dim` is the dimensionality of the input features.
-            y_batch (torch.Tensor): Corresponding batch of target labels with shape (batch_size, K), 
-            where `K` is the number of outputs (attributes).
-            data_size (int, optional): Total size of the dataset. Defaults to the size of `X_batch`.
-            verbose (bool, optional): If True, prints detailed loss information for each head and regularization loss. Defaults to False.
+            X_batch (torch.Tensor): Input batch of features.
+            y_batch (torch.Tensor): Corresponding batch of target labels.
+            data_size (int, optional): Total size of the dataset. Defaults to None.
+            verbose (bool, optional): If True, prints detailed loss information. Defaults to False.
 
         Returns:
-            torch.Tensor: The total test loss, including the sum of individual head losses and the regularization loss.
-
-        Notes:
-            - This method is identical to `train_loss` but is used for testing purposes to maintain semantic clarity.
-            - The loss for each head is computed using the `loss` function, and the total loss is the sum of all head losses.
-            - If regularization is enabled (i.e., `self.beta` is non-zero), a regularization loss is added to the total loss.
+            torch.Tensor: The total test loss.
         """
         return self.train_loss(X_batch, y_batch, data_size, verbose)

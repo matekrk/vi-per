@@ -28,20 +28,18 @@ def create_model(cfg):
     backbone = models.get_backbone(cfg)
 
     model_classes = {
-        "logisticvi": models.LogisticVI,
-        "logisticpointwise": models.LogisticPointwise,
-        "softmaxvbll": models.SoftmaxVBLL,
-        "softmaxpointwise": models.SoftmaxPointwise,
-        "cc_logisticvi": models.LogisticVICC,
-        "cc_logisticpointwise": models.LogisticPointwiseCC,
-        "cc_softmaxvbll": models.SoftmaxVBLLCC,
-        "cc_softmaxpointwise": models.SoftmaxPointwiseCC,
+        "softmax_point": models.SoftmaxModel,
+        "logistic_point": models.LogisticModel,
+        "logistic_variational_diag": models.DiagonalVIModel,
+        "logistic_variational_lowrank": models.LowRankVIModel,
+        "logistic_variational_full": models.FullVIModel,
     }
     if cfg.model_type not in model_classes:
         raise ValueError(f"Unknown model_type={cfg.model_type}")
 
     model_class = model_classes[cfg.model_type]
     model_args = {k: v for k, v in vars(cfg).items() if k in model_class.__init__.__code__.co_varnames}
+    model_args["nums_per_output"] = 2 if "softmax" in cfg.model_type or "vbll" in cfg.model_type else 1
     print(model_args)
     return model_class(**model_args, backbone=backbone)
 

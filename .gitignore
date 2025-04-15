@@ -170,6 +170,7 @@ wandb.txt
 wandb.txt
 data/
 slurms/
+out_slurms/
 results/
 bn_shapes
 cfgs/
@@ -178,9 +179,12 @@ cfgs_dep/
 cfgs_dep_old/
 cfgs_cc/
 cfgs_pascal/
+cfgs_each/
+cfgs_resnet18
 command
 command_new
 command_dep
 command_cc
 command_pascal
 command_each
+command_resnet18

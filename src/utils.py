@@ -10,6 +10,8 @@ import warnings
 from sklearn.exceptions import UndefinedMetricWarning
 warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
 
+import models
+
 def default_dependency(M):
     if len(M) == 1:
         return [[1.0]]
@@ -19,6 +21,27 @@ def default_dependency(M):
         p_t = [0.67, 0.67, 0.33, 0.33]
         p_st = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2]
         return [p_o, p_sq, p_t, p_st]
+
+"""# General / Utils model"""
+def create_model(cfg):
+
+    backbone = models.get_backbone(cfg)
+
+    model_classes = {
+        "softmax_point": models.SoftmaxModel,
+        "logistic_point": models.LogisticModel,
+        "logistic_variational_diag": models.DiagonalVIModel,
+        "logistic_variational_lowrank": models.LowRankVIModel,
+        "logistic_variational_full": models.FullVIModel,
+    }
+    if cfg.model_type not in model_classes:
+        raise ValueError(f"Unknown model_type={cfg.model_type}")
+
+    model_class = model_classes[cfg.model_type]
+    model_args = {k: v for k, v in vars(cfg).items() if k in model_class.__init__.__code__.co_varnames}
+    model_args["nums_per_output"] = 2 if "softmax" in cfg.model_type or "vbll" in cfg.model_type else 1
+    print(model_args)
+    return model_class(**model_args, backbone=backbone)
 
 def evaluate(model, test_dataloader, K, device, prefix = "", threshold = 0.5, verbose = False, plot_confusion=True):
     print("------------------------------------")
@@ -35,8 +58,8 @@ def evaluate(model, test_dataloader, K, device, prefix = "", threshold = 0.5, ve
 
     with torch.no_grad():
         for X_batch, y_batch in test_dataloader:
-            X_batch = X_batch.to(device)
-            y_batch = y_batch.to(device)
+            X_batch = X_batch.to(torch.double).to(device)
+            y_batch = y_batch.to(torch.double).to(device)
             y_pred, batch_preds = model.predict(X_batch, threshold)
             preds.append(batch_preds)
             y_preds.append(y_pred)
@@ -310,11 +333,33 @@ def do_ece_single_attribute(y_test, y_pred, preds_one, confidences, num_bins=20)
     return ece, fig
     
 @torch.no_grad()
-def compute_confusion_matrix(model, X_test, y_test, K, device, threshold = 0.5):
+def compute_confusion_matrix(model, X_test, y_test, K, device, threshold = 0.5, batchsize = None):
     model.eval()
-    X_test = X_test.to(device)
-    y_test = y_test.to(device)
-    y_pred, preds = model.predict(X_test, threshold)
+    if batchsize is None:
+        X_test = X_test.to(device)
+        y_test = y_test.to(device)
+        y_pred, preds = model.predict(X_test, threshold)
+    else:
+        preds, y_preds, y_tests = [], [], []
+        for i in range(0, len(X_test), batchsize):
+            X_batch = X_test[i:i+batchsize]
+            y_batch = y_test[i:i+batchsize]
+            X_batch = X_batch.to(torch.double).to(device)
+            y_batch = y_batch.to(torch.double).to(device)
+            y_pred, batch_preds = model.predict(X_batch, threshold)
+            preds.append(batch_preds)
+            y_preds.append(y_pred)
+            y_tests.append(y_batch)
+
+        preds = torch.cat(preds, dim=0)
+        y_pred = torch.cat(y_preds, dim=0)
+        y_test = torch.cat(y_tests, dim=0)
+
+    assert y_pred.shape == y_test.shape, f"y_pred.shape={y_pred.shape} != y_test.shape={y_test.shape}"
+    assert y_pred.shape[1] == K, f"y_pred.shape[1]={y_pred.shape[1]} != K={K}"
+    assert len(preds) == len(y_test), f"len(preds)={len(preds)} != len(y_test)={len(y_test)}"
+    assert len(y_pred) == len(y_test), f"len(y_pred)={len(y_pred)} != len(y_test)={len(y_test)}"
+    
     confusion_matrix = torch.zeros(K, K)
     for i in range(K):
         for j in range(K):
@@ -324,7 +369,7 @@ def compute_confusion_matrix(model, X_test, y_test, K, device, threshold = 0.5):
 def modify_last_layer_lr(named_params, backbone_freeze, base_lr, lr_mult_w, lr_mult_b, base_wd, last_layer_wd = None, no_wd_last = False):
     if last_layer_wd is None:
         last_layer_wd = base_wd
-    params = list()
+    modified_named_params = torch.nn.ParameterList()
     print("Model architecture...")
     for name, param in named_params:
         print(name, f"gradient: {param.requires_grad}", f"shape: {param.shape}")
@@ -333,18 +378,19 @@ def modify_last_layer_lr(named_params, backbone_freeze, base_lr, lr_mult_w, lr_m
                 param.requires_grad = False
             else:
                 if 'bias' in name:
-                    params += [{'params': param, 'lr': base_lr, 'weight_decay': 0}]
+                    modified_named_params += [{'params': param, 'lr': base_lr, 'weight_decay': 0}]
                 else:
-                    params += [{'params': param, 'lr': base_lr, 'weight_decay': base_wd}]
+                    modified_named_params += [{'params': param, 'lr': base_lr, 'weight_decay': base_wd}]
         else:
             if 'bias' in name:
-                params += [{'params': param, 'lr': base_lr * lr_mult_b, 'weight_decay': 0}]
+                modified_named_params += [{'params': param, 'lr': base_lr * lr_mult_b, 'weight_decay': 0}]
             else:
-                params += [{'params': param, 'lr': base_lr * lr_mult_w, 'weight_decay': 0 if no_wd_last else last_layer_wd}]
-    return params
+                modified_named_params += [{'params': param, 'lr': base_lr * lr_mult_w, 'weight_decay': 0 if no_wd_last else last_layer_wd}]
+    return modified_named_params
 
 def create_optimizer_scheduler(args, model):
-    finetune_params = modify_last_layer_lr(model.named_parameters(), args.backbone_freeze, args.lr, args.lr_mult_w, args.lr_mult_b, args.wd, args.last_layer_wd, args.no_wd_last)
+    model_params = model.get_learnable_parameters()
+    finetune_params = modify_last_layer_lr(model_params, args.backbone_freeze, args.lr, args.lr_mult_w, args.lr_mult_b, args.wd, args.last_layer_wd, args.no_wd_last)
     common_params = {
         "lr": args.lr,
         "weight_decay": args.wd
@@ -370,9 +416,12 @@ def create_optimizer_scheduler(args, model):
     optimizer_class = optimizer_map[args.optimizer.lower()]
     optimizer = optimizer_class(finetune_params, **common_params, **optimizer_specific_params[args.optimizer.lower()])
     
-    scheduler = optim.lr_scheduler.StepLR(optimizer, 
-                                          step_size=args.lr_decay_in_epoch,
-                                          gamma=args.gamma)
+    if args.lr_decay_in_epoch:
+        scheduler = optim.lr_scheduler.StepLR(optimizer, 
+                                            step_size=args.lr_decay_in_epoch,
+                                            gamma=args.gamma)
+    else:
+        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: 1.0)
     return optimizer, scheduler
 
 def wandb_unpack(file_path):
@@ -391,6 +440,8 @@ def wandb_init(cfg):
     wandb.define_metric("train/*", step_metric="train/epoch")
     wandb.define_metric("test/epoch")
     wandb.define_metric("test/*", step_metric="test/epoch")
+    wandb.define_metric("layers/epoch")
+    wandb.define_metric("layers/*", step_metric="layers/epoch")
 
 def log(wandb_log, metrics = None, time = None, time_metric=None, specific_key = None, evaluated = False, prefix = "train", particular_metric_key = None, particular_metric_value = None, figure_img = None, figure_summary = None):
     if not wandb_log:
@@ -552,6 +603,13 @@ def empty_metrics():
     }
     return metrics
 
+def empty_grads_norm_metrics(model):
+    metrics = {}
+    for name, param in model.named_parameters():
+        metrics[f"gradient_{name}"] = []
+        metrics[f"norm_{name}"] = []
+    return metrics
+
 def default_config():
     cfg = \
         {
@@ -574,6 +632,7 @@ def default_config():
             "VBLL_PATH": None,
             "VBLL_TYPE": None,
             "VBLL_SOFTMAX_BOUND": None,
+            "VBLL_SOFTMAX_BOUND_EMPIRICAL": None,
             "VBLL_RETURN_EMPIRICAL": None,
             "VBLL_RETURN_OOD": None,
             "VBLL_PRIOR_SCALE": None,

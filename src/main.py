@@ -6,15 +6,15 @@ import sys
 import matplotlib.pyplot as plt
 import torch
 
-from backbone import get_backbone
 from data import prepare_dataset, prepare_dataloader, \
     prepare_data_shapes, prepare_data_shapes_ood, \
     prepare_data_pascal_voc_05, prepare_data_pascal_voc_12, \
     prepare_loader_pascal_voc_05, prepare_loader_pascal_voc_12
-from model import create_model
-from utils import compute_confusion_matrix, create_optimizer_scheduler, \
-    empty_metrics, default_config, evaluate, wandb_init, log
+from utils import create_model, create_optimizer_scheduler, empty_grads_norm_metrics, \
+    empty_metrics, default_config, \
+    evaluate, compute_confusion_matrix, wandb_init, log
 from plot_results import plot_summary
+from collections import defaultdict
 
 default_config = default_config()
 
@@ -71,9 +71,7 @@ def train(cfg):
         X_ood, y_ood = None, None
         ood_data_loader = None
 
-    backbone = get_backbone(cfg)
-
-    model = create_model(cfg, backbone).to(device) # can later use next(model.parameters()).device ?
+    model = create_model(cfg).to(torch.double).to(device)
 
     model_init = copy.deepcopy(model)
 
@@ -106,6 +104,8 @@ def train(cfg):
     log(cfg.wandb, time=0, particular_metric_key="best/test_mean_ece", particular_metric_value = best_test_mean_ece)
 
     metrics = empty_metrics()
+    grads_norm_metrics = empty_grads_norm_metrics(model)
+    metrics.update(grads_norm_metrics)
     epochs_eval = []
 
     for epoch in range(cfg.n_epochs):
@@ -115,11 +115,12 @@ def train(cfg):
 
         grad_norm_accum = 0.0
         param_norm_accum = 0.0
+        norm_grad_epoch_dict = defaultdict(list)
 
         epoch_loss = 0
         model.train()
         for iter, (X_batch, y_batch) in enumerate(data_loader):
-            X_batch, y_batch = X_batch.to(device), y_batch.to(device)
+            X_batch, y_batch = X_batch.to(torch.double).to(device), y_batch.to(torch.double).to(device)
             optimizer.zero_grad()
             loss = model.train_loss(X_batch, y_batch, data_size, verbose=verbose_iter)
             loss.backward()
@@ -130,10 +131,12 @@ def train(cfg):
             if test_evaluate:
                 grad_norm = 0.0
                 param_norm = 0.0
-                for param in model.parameters():
+                for name, param in model.named_parameters():
                     if param.grad is not None:
                         grad_norm += param.grad.norm().item() ** 2
                         param_norm += param.data.norm().item() ** 2
+                        norm_grad_epoch_dict[f"gradient_{name}"].append(param.grad.norm().item())
+                        norm_grad_epoch_dict[f"norm_{name}"].append(param.data.norm().item())
                 grad_norm_accum += grad_norm ** 0.5
                 param_norm_accum += param_norm ** 0.5
 
@@ -163,6 +166,13 @@ def train(cfg):
 
             metrics["param_norm"].append(param_norm_avg)
             log(cfg.wandb, metrics, epoch, specific_key="param_norm")
+
+            if verbose:
+                print("saved from that many param groups", len(norm_grad_epoch_dict.keys()))
+            for name in norm_grad_epoch_dict.keys():
+                metrics[name].append(sum(norm_grad_epoch_dict[name]) / len(data_loader))
+                metrics[name].append(sum(norm_grad_epoch_dict[name]) / len(data_loader))
+                log(cfg.wandb, metrics, epoch, specific_key=name, prefix="layers")
 
             epochs_eval.append(epoch)
             print("Train evaluation")
@@ -298,7 +308,7 @@ def train(cfg):
     
     confusion_matrix = None
     if X_test is not None and y_test is not None:
-        confusion_matrix = compute_confusion_matrix(model, X_test, y_test, cfg.K, device, threshold=cfg.f1_thres)
+        confusion_matrix = compute_confusion_matrix(model, X_test, y_test, cfg.K, device, threshold=cfg.f1_thres, batchsize=cfg.batch_size)
     fig = plot_summary(cfg, metrics, epoch, epochs_eval, confusion_matrix)
     log(cfg.wandb, metrics, epoch, figure_summary=fig)
     return metrics
@@ -337,10 +347,15 @@ if __name__ == "__main__":
         except:
             print("Error in saving metrics_summary")
             for k, v in metrics_summary.items():
-                if isinstance(v, list):
-                    if isinstance(v[0], list):
-                        print(k, type(v[0][0]))
-                    else:
+                if isinstance(v, list) and len(v):
+                    try:
+                        if isinstance(v[0], list):
+                            print(k, type(v[0][0]))
+                        else:
+                            print(k, type(v[0]))
+                    except:
+                        print("Error in saving metrics_summary")
+                        print("Metric key", k, "Length", len(k))
                         print(k, type(v[0]))
                 else:
                     print(k, type(v))

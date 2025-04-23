@@ -134,7 +134,7 @@ class VBLLModel(LLModel):
             - torch.Tensor: A tensor of shape (batch_size, K) containing the predicted 
               class indices for each of the K outputs.
             - torch.Tensor: A tensor of shape (batch_size, K, num_classes) containing 
-              the raw predictions (e.g., logits or probabilities) for each class.
+              the raw predictions (e.g., probabilities) for each class.
         Notes:
             - The method computes predictions for each of the K outputs by selecting the 
               class with the highest score (argmax) along the last dimension.
@@ -147,7 +147,7 @@ class VBLLModel(LLModel):
         for i_k in range(self.K):
             max_class = torch.argmax(logits[:, i_k, :], dim=-1)
             all_preds.append(max_class)
-        return torch.stack(all_preds, dim=1), logits
+        return torch.stack(all_preds, dim=1), torch.softmax(logits, dim=-1)
 
     def train_loss(self, X_batch, y_batch, data_size=None, verbose=False):
         """

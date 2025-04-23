@@ -33,6 +33,7 @@ def create_model(cfg):
         "logistic_variational_diag": models.DiagonalVIModel,
         "logistic_variational_lowrank": models.LowRankVIModel,
         "logistic_variational_full": models.FullVIModel,
+        "vbll": models.VBLLModel,
     }
     if cfg.model_type not in model_classes:
         raise ValueError(f"Unknown model_type={cfg.model_type}")

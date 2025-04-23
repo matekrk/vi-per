@@ -32,15 +32,15 @@ class LLModel(nn.Module):
         # Initialize chain-of-classifier functionality if chain_order is provided
         assert chain_order is None or chain_type in ChainOfClassifiers.valid_chain_types, \
             f"Invalid chain_type: {chain_type}. Must be one of {ChainOfClassifiers.valid_chain_types}."
-        self.chain_order = ChainOfClassifiers(K, chain_order, chain_type, nums_per_output) if chain_order else None
+        self.chain = ChainOfClassifiers(K, chain_order, chain_type, nums_per_output) if chain_order else None
         self.chain_type = chain_type
         self.intercept = intercept
         p_adjusted = p
         if intercept:
             p_adjusted += 1
         self.K = K
-        if self.chain_order is not None:
-            p_adjusted += self.chain_order.extra_dim
+        if self.chain is not None:
+            p_adjusted += self.chain.extra_dim
         self.p = p_adjusted
         self.backbone = backbone
         self.beta = beta
@@ -85,10 +85,14 @@ class LLModel(nn.Module):
     
     def test_loss(self, X_batch, y_batch, data_size=None, verbose=False):
         raise NotImplementedError("[LLModel] test_loss not implemented")
-
-    def predict(self, X, threshold=0.5):
-        preds = self.forward(X)
-        return (preds > threshold).float(), preds
     
     def forward(self, X):
         raise NotImplementedError("[LLModel] forward mechanism not implemented")
+    
+    def predict(self, X):
+        raise NotImplementedError("[LLModel] predict mechanism not implemented")
+    
+    def compute_negative_log_likelihood(self, X_batch, y_batch):
+        raise NotImplementedError("[LLModel] compute_negative_log_likelihood not implemented")
+    
+    

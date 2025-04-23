@@ -3,6 +3,7 @@ from .generic import LLModel
 from .softmax_point import SoftmaxModel
 from .logistic_point import LogisticModel
 from .viper import BaseVIModel, DiagonalVIModel, LowRankVIModel, FullVIModel
+from .vbll import VBLLModel
 
 
 __all__ = [
@@ -13,5 +14,6 @@ __all__ = [
     "BaseVIModel",
     "DiagonalVIModel",
     "LowRankVIModel",
-    "FullVIModel"
+    "FullVIModel",
+    "VBLLModdel"
 ]

@@ -216,7 +216,7 @@ class VBLLModel(LLModel):
         return self.train_loss(X_batch, y_batch, data_size=data_size, verbose=verbose)
 
     @torch.no_grad()
-    def compute_negative_log_likelihood(self, X, y, mc = False, n_samples = 1000):
+    def compute_negative_log_likelihood(self, X_batch, y_batch, mc = False, n_samples = 1000):
         """
         Compute the negative log-likelihood (NLL) for the given input data and targets.
         Args:
@@ -232,11 +232,23 @@ class VBLLModel(LLModel):
             - If `mc` is True, Monte Carlo sampling is used to approximate the NLL, but this functionality is not implemented in the provided code.
         """
         
-        X_processed = self.process(X)
+        X_processed = self.process(X_batch)
         nlls = []
-        for head, y in zip(self.heads, y.T):
-            nll = head(X_processed).val_loss_fn(y.long())
-            nlls.append(nll)
+        if self.chain:
+            prev_list = []
+            for i_k, head in enumerate(self.heads):
+                X = self.chain.process_chain(X_processed, prev_list, i_k)
+                y = y_batch[:, i_k] if y_batch is not None else None
+                out = head(X)
+                probs = out.predictive.probs
+                logits = out.predictive.logits
+                nll = out.val_loss_fn(y.long())
+                nlls.append(nll)
+                prev_list = self.chain.update_chain(prev_list, logits, probs, y)
+        else:
+            for head, y in zip(self.heads, y_batch.T):
+                nll = head(X_processed).val_loss_fn(y.long())
+                nlls.append(nll)
         return torch.stack(nlls)
 
     @torch.no_grad()

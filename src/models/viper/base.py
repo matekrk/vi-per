@@ -257,19 +257,19 @@ class BaseVIModel(LLModel):
         return self.compute_ELBO(X_batch, y_batch, data_size=X_batch.shape[0], other_beta=0.0)
 
     @torch.no_grad()
-    def get_confidences(self, preds):
+    def get_confidences(self, probs):
         """
         Compute the confidence scores for the predictions. The confidence is defined as the maximum 
         between the predicted probability and its complement (1 - predicted probability).
         Args:
-            preds (torch.Tensor): A tensor containing predicted probabilities for each output. 
+            probs (torch.Tensor): A tensor containing predicted probabilities for each output. 
                       Shape should be (n_samples, K), where `n_samples` is the number 
                       of samples and `K` is the number of classes or outputs.
         Returns:
             torch.Tensor: A tensor of confidence scores for each prediction. Shape matches the 
-                  input `preds` tensor.
+                  input `probs` tensor.
         Notes:
-            - This method assumes that `preds` contains probabilities in the range [0, 1].
+            - This method assumes that `probs` contains probabilities in the range [0, 1].
             - The confidence score represents the model's certainty about its predictions.
         """
-        return torch.max(torch.stack([preds, 1 - preds]), dim=0)[0]
+        return torch.max(torch.stack([probs, 1 - probs]), dim=0)[0]

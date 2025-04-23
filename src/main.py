@@ -167,8 +167,6 @@ def train(cfg):
             metrics["param_norm"].append(param_norm_avg)
             log(cfg.wandb, metrics, epoch, specific_key="param_norm")
 
-            if verbose:
-                print("saved from that many param groups", len(norm_grad_epoch_dict.keys()))
             for name in norm_grad_epoch_dict.keys():
                 metrics[name].append(sum(norm_grad_epoch_dict[name]) / len(data_loader))
                 metrics[name].append(sum(norm_grad_epoch_dict[name]) / len(data_loader))

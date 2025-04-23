@@ -89,8 +89,7 @@ class VBLLModel(LLModel):
         vbll_constr = self._make_gen_vbll_layer if vbll_type == "gen" else self._make_disc_vbll_layer
         heads = []
         for i_k, num_classes in enumerate(num_classes_lst):
-            if num_classes == 2:
-                heads.append(vbll_constr(vbll_package, num_hidden=self.p, num_classes=num_classes, cfg=cfg))
+            heads.append(vbll_constr(vbll_package, num_hidden=self.p, num_classes=num_classes, cfg=cfg))
         self.heads = nn.ModuleList(heads)
         
 

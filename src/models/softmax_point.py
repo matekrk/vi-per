@@ -34,7 +34,6 @@ class SoftmaxModel(LLModel):
         p_adjusted = super().__init__(p, K, beta, intercept, backbone, chain_order, chain_type, nums_per_output)
         print(f"[SoftmaxPointwiseModel] input_dim={p_adjusted} output_dim={K} beta={beta} chain_type={chain_type} chain_type={chain_type}")
 
-        self.chain = self.chain_order is not None
         self.loss = nn.CrossEntropyLoss(reduction='mean')
 
         # Initialize number of classes for each output
@@ -108,7 +107,7 @@ class SoftmaxModel(LLModel):
 
         for i_k, head in enumerate(self.heads):
             if self.chain:
-                X_current = self.chain_order.process_chain(X_processed, prev_list, i_k)
+                X_current = self.chain.process_chain(X_processed, prev_list, i_k)
             else:
                 X_current = X_processed
 
@@ -117,7 +116,7 @@ class SoftmaxModel(LLModel):
 
             if self.chain:
                 y = y_batch[:, i_k] if y_batch is not None else None
-                prev_list = self.chain_order.update_chain(prev_list, logit, torch.softmax(logit, dim=-1), y)
+                prev_list = self.chain.update_chain(prev_list, logit, torch.softmax(logit, dim=-1), y)
 
         logits = torch.cat(logits, dim=1)
         return logits

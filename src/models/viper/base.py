@@ -10,8 +10,8 @@ from ..cc import ChainOfClassifiers
 
 class VIMethod(Enum):
     """Enumeration of variational inference methods."""
-    TB_BOUND = 0  # Proposed TB with diagonal covariance
-    MONTE_CARLO = 4    # Monte Carlo with diagonal covariance
+    TB_BOUND = 0  # Proposed TB bound
+    MONTE_CARLO = 4    # Monte Carlo estimation
 
 def get_method(method):
     # Store the VI method
@@ -22,7 +22,7 @@ def get_method(method):
         elif method == 4:
             method = VIMethod.MONTE_CARLO
         else:
-            raise ValueError(f"Method {method} not supported for DiagonalVIModel. Use 0 (TB) or 4 (MC).")
+            raise ValueError(f"Method {method} not supported for VIModel. Use 0 (TB) or 4 (MC).")
     elif isinstance(method, VIMethod):
         method = method
     else:
@@ -70,10 +70,6 @@ class BaseVIModel(LLModel):
         """
         p_adjusted = super().__init__(p, K, beta, intercept, backbone, chain_order, chain_type, nums_per_output)
         self.p = p_adjusted  # Adjust for intercept
-
-        # Initialize chain-of-classifier functionality if chain_order is provided
-        self.chain = ChainOfClassifiers(K, chain_order=chain_order, chain_type=chain_type) if chain_order else None
-
         
         # VI hyperparameters
         self.adaptive_l = adaptive_l
@@ -219,3 +215,61 @@ class BaseVIModel(LLModel):
             list: List of length K containing standard deviation vectors
         """
         return [torch.exp(log_scale) for log_scale in self.posterior_log_scale_list]
+
+    @torch.no_grad()
+    def predict(self, X_batch, threshold=0.5):
+        """
+        Predict binary outputs for the input data.
+
+        Args:
+            X_batch (torch.Tensor): Input data.
+            threshold (float, optional): Threshold for binary classification. Defaults to 0.5.
+
+        Returns:
+            tuple: A tuple containing:
+                - torch.Tensor: Predicted binary outputs (0 or 1).
+                - torch.Tensor: Predicted probabilities.
+        """
+        probs = self.forward(X_batch)
+        return (probs > threshold).float(), probs
+    
+    @torch.no_grad()
+    def compute_negative_log_likelihood(self, X_batch, y_batch, mc = False, n_samples = 1000):
+        """
+        Compute the negative log likelihood of the data given the predictions.
+
+        Parameters:
+        ----------
+        X_batch : torch.Tensor
+            Predicted probabilities for each output. Shape (n_samples, K).
+        y_batch : torch.Tensor
+            Target variables. Shape (n_samples, K).
+        mc: bool, optional [Dumb argument]
+            Whether to use Monte Carlo estimation. Default is False.
+        n_samples : int (optional) [Dumb argument]
+            Number of samples for Monte Carlo estimation. Default is 1000.
+
+        Returns:
+        -------
+        nll : torch.Tensor
+            The computed negative log likelihood for each attribute. Shape (K).
+        """
+        return self.compute_ELBO(X_batch, y_batch, data_size=X_batch.shape[0], other_beta=0.0)
+
+    @torch.no_grad()
+    def get_confidences(self, preds):
+        """
+        Compute the confidence scores for the predictions. The confidence is defined as the maximum 
+        between the predicted probability and its complement (1 - predicted probability).
+        Args:
+            preds (torch.Tensor): A tensor containing predicted probabilities for each output. 
+                      Shape should be (n_samples, K), where `n_samples` is the number 
+                      of samples and `K` is the number of classes or outputs.
+        Returns:
+            torch.Tensor: A tensor of confidence scores for each prediction. Shape matches the 
+                  input `preds` tensor.
+        Notes:
+            - This method assumes that `preds` contains probabilities in the range [0, 1].
+            - The confidence score represents the model's certainty about its predictions.
+        """
+        return torch.max(torch.stack([preds, 1 - preds]), dim=0)[0]

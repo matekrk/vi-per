@@ -182,7 +182,7 @@ class LowRankVIModel(BaseVIModel):
         """
         X_processed = self.process(X_batch)
 
-        if self.chain:  # Chain-of-classifier mode
+        if self.chain:
             prev_list = []
             probs_list = []
 
@@ -192,15 +192,13 @@ class LowRankVIModel(BaseVIModel):
                 probs, logits = self.expected_sigmoid(X, i_k)
                 probs_list.append(probs.unsqueeze(1))
                 prev_list = self.chain.update_chain(prev_list, logits, probs, y)
-
-            probs = torch.cat(probs_list, dim=1)
-        else:  # Regular mode
+        else:
             probs_list = [self.expected_sigmoid(X_processed, i_k)[0].unsqueeze(1) for i_k in range(self.K)]
-            probs = torch.cat(probs_list, dim=1)
-
+        
+        probs_out = torch.cat(probs_list, dim=1)
         assert probs.shape == (X_batch.shape[0], self.K), \
-            f"probs.shape={probs.shape} != ({X_batch.shape[0]}, {self.K})"
-        return probs
+            f"probs.shape={probs_out.shape} != ({X_batch.shape[0]}, {self.K})"
+        return probs_out
     
     def compute_ELBO(self, X_batch, y_batch, data_size, verbose=False, other_beta=None):
         """
@@ -307,41 +305,6 @@ class LowRankVIModel(BaseVIModel):
         """
         data_size = data_size or X_batch.shape[0]
         return -torch.sum(self.compute_ELBO(X_batch, y_batch, data_size, verbose=verbose, other_beta=0.0))
-    
-    def compute_negative_log_likelihood(self, X_batch, y_batch, mc=False, n_samples=1000):
-        """
-        Compute the negative log likelihood (NLL) of the data given the predictions.
-
-        Args:
-            X_batch (torch.Tensor): Input data. Shape (n_samples, input_dim).
-            y_batch (torch.Tensor): Target variables. Shape (n_samples, K).
-            mc (bool, optional): Whether to use Monte Carlo estimation. Defaults to False.
-            n_samples (int, optional): Number of samples for MC estimation. Defaults to 1000.
-
-        Returns:
-            torch.Tensor: The computed negative log likelihood for each output. Shape (K,).
-        """
-        return self.compute_ELBO(X_batch, y_batch, data_size=X_batch.shape[0], other_beta=0.0)
-        # X_processed = self.process(X_batch)
-        # return torch.tensor([
-        #     neg_ELL_MC_mvn(self.posterior_mean_list[i_k], self.cov_list[i_k], y_batch[:, i_k], X_processed, n_samples=n_samples)
-        #     if mc else
-        #     neg_ELL_TB_mvn(self.posterior_mean_list[i_k], self.cov_list[i_k], y_batch[:, i_k], X_processed, l_max=self.l_terms)
-        #     for i_k in range(self.K)
-        # ], device=X_batch.device)
-
-    def get_confidences(self, preds):
-        """
-        Compute the confidence scores for the predictions.
-
-        AReturns:
-            torch.Tensor: A tensor of confidence scores for each prediction. Shape matches the 
-                  input `preds` tensor.
-        Notes:
-            - This method assumes that `preds` contains probabilities in the range [0, 1].
-            - The confidence score represents the model's certainty about its predictions.
-        """
-        return torch.max(torch.stack([preds, 1 - preds]), dim=0)[0]
 
     @property
     def prior_scale_list(self):

@@ -34,7 +34,6 @@ class LogisticModel(LLModel):
         p_adjusted = super().__init__(p, K, beta, intercept, backbone, chain_order, chain_type, nums_per_output)
         print(f"[PointwiseModel] input_dim={p_adjusted} output_dim={K} beta={beta} chain_order={chain_order} chain_type={chain_type}")
 
-        self.chain = self.chain_order is not None
         self.loss = nn.BCELoss(reduction='mean')
 
         # Initialize prior means and log scales
@@ -122,25 +121,25 @@ class LogisticModel(LLModel):
         """
         X_processed = self.process(X_batch)
         prev_list = []
-        preds = []
+        probs_list = []
 
         for i_k in range(self.K):
             if self.chain:
-                X_current = self.chain_order.process_chain(X_processed, prev_list, i_k)
+                X_current = self.chain.process_chain(X_processed, prev_list, i_k)
             else:
                 X_current = X_processed
 
             logits = torch.matmul(X_current, self.delta_dirac_weight_list[i_k])
             probs = torch.sigmoid(logits)
-            preds.append(probs.unsqueeze(1))
+            probs_list.append(probs.unsqueeze(1))
 
             if self.chain:
                 y = y_batch[:, i_k] if y_batch is not None else None
-                prev_list = self.chain_order.update_chain(prev_list, logits, probs, y)
+                prev_list = self.chain.update_chain(prev_list, logits, probs, y)
 
-        preds = torch.cat(preds, dim=1)
-        assert preds.shape == (X_batch.shape[0], self.K), f"preds.shape={preds.shape} != (X.shape[0], {self.K})"
-        return preds
+        probs_out = torch.cat(probs_list, dim=1)
+        assert probs_out.shape == (X_batch.shape[0], self.K), f"probs.shape={probs_out.shape} != (X.shape[0], {self.K})"
+        return probs_out
 
     def regularization(self):
         """
@@ -190,8 +189,8 @@ class LogisticModel(LLModel):
                 - torch.Tensor: Predicted binary outputs (0 or 1).
                 - torch.Tensor: Predicted probabilities.
         """
-        preds = self.forward(X_batch)
-        return (preds > threshold).float(), preds
+        probs = self.forward(X_batch)
+        return (probs > threshold).float(), probs
 
     @torch.no_grad()
     def test_loss(self, X_batch, y_batch, data_size=None, verbose=False):
@@ -235,9 +234,9 @@ class LogisticModel(LLModel):
         nll : torch.Tensor
             The computed negative log likelihood for each attribute. Shape (K).
         """
-        preds = self.forward(X_batch)
+        probs = self.forward(X_batch)
         loss = nn.BCELoss(reduction='none')
-        nll = torch.mean(loss(preds, y_batch), dim=0)
+        nll = torch.mean(loss(probs, y_batch), dim=0)
         assert nll.shape == (self.K,), f"nll.shape={nll.shape} != (K={self.K})"
         return nll
 
@@ -257,5 +256,3 @@ class LogisticModel(LLModel):
             - The confidence score represents the model's certainty about its predictions.
         """
         return torch.max(torch.stack([preds, 1 - preds]), dim=0)[0]
-
-    

@@ -204,19 +204,19 @@ class SoftmaxModel(LLModel):
             nlls.append(nll)
         return torch.stack(nlls)
 
-    def get_confidences(self, preds):
+    def get_confidences(self, probs):
         """
-        Compute the confidence scores for the given predictions.
+        Compute the confidence scores for the given probabilities.
 
         Args:
-            preds (torch.Tensor): A tensor containing the predictions, where the last dimension 
+            probs (torch.Tensor): A float tensor, where the last dimension 
                                 represents the class probabilities.
 
         Returns:
             torch.Tensor: A tensor containing the maximum confidence score for each prediction 
                         along the last dimension.
         """
-        return torch.max(preds, dim=-1)[0]
+        return torch.max(probs, dim=-1)[0]
 
     @torch.no_grad()
     def test_loss(self, X_batch, y_batch, data_size=None, verbose=False):

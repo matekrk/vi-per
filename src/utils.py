@@ -2,6 +2,7 @@ import os
 import matplotlib.pyplot as plt
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from sklearn.metrics import jaccard_score, label_ranking_loss, label_ranking_average_precision_score
+from sklearn.metrics import roc_auc_score
 import torch
 import torch.optim as optim
 import wandb
@@ -43,6 +44,71 @@ def create_model(cfg):
     model_args["nums_per_output"] = 2 if "softmax" in cfg.model_type or "vbll" in cfg.model_type else 1
     print(model_args)
     return model_class(**model_args, backbone=backbone)
+
+def compute_brier_score(probabilities, targets):
+    """
+    Compute Brier score
+    
+    Args:
+        probabilities: predicted probabilities, shape (n_samples, n_classes) or (n_samples, n_classes, 2)
+        targets: true labels, shape (n_samples, n_classes)
+        
+    Returns:
+        brier_score: float
+    """
+    # if isinstance(probabilities, torch.Tensor):
+    #     probabilities = probabilities.detach().cpu().numpy()
+    # if isinstance(targets, torch.Tensor):
+    #     targets = targets.detach().cpu().numpy()
+
+    assert probabilities.max() <= 1.0 and probabilities.min() >= 0.0, f"probabilities={probabilities} not in [0, 1]"
+        
+    if len(probabilities.shape) == 1 or probabilities.shape[1] == 1:
+        assert targets.shape == probabilities.shape, f"targets.shape={targets.shape} != probabilities.shape={probabilities.shape}"
+        return torch.mean((probabilities - targets) ** 2).item()
+    else:
+        n_samples, n_classes = probabilities.shape[0], probabilities.shape[1]
+        targets_one_hot = torch.zeros((n_samples, n_classes, 2))
+        targets_one_hot = targets_one_hot.to(probabilities.device)
+        targets_one_hot.scatter_(2, targets.long().unsqueeze(-1), 1.0)
+        assert probabilities.shape == targets_one_hot.shape, f"probabilities.shape={probabilities.shape} != targets_one_hot.shape={targets_one_hot.shape}"
+        return torch.mean(torch.sum((probabilities - targets_one_hot) ** 2, dim=1)).item()
+
+def compute_auc(probabilities, targets):
+    """
+    Compute AUC (Area Under ROC Curve)
+    
+    Args:
+        probabilities: predicted probabilities, shape (n_samples, n_classes) or (n_samples, n_classes, 2)
+        targets: true labels, shape (n_samples, n_classes)
+        
+    Returns:
+        auc_score: float or dict of AUC scores for multi-class
+    """
+    assert probabilities.max() <= 1.0 and probabilities.min() >= 0.0, f"probabilities={probabilities} not in [0, 1]"
+
+    # if isinstance(probabilities, torch.Tensor):
+    #     probabilities = probabilities.detach().cpu().numpy()
+    # if isinstance(targets, torch.Tensor):
+    #     targets = targets.detach().cpu().numpy()
+    
+    if len(probabilities.shape) == 1 or probabilities.shape[1] == 1:
+        assert probabilities.shape == targets.shape, f"probabilities.shape={probabilities.shape} != targets.shape={targets.shape}"
+        return roc_auc_score(targets.cpu().numpy(), probabilities.cpu().numpy())
+    else:
+        n_classes = probabilities.shape[1]
+        
+        aucs = []
+        for i_k in range(n_classes):  # One-vs-Rest AUC for each class
+            binary_targets = targets[:, i_k].to(torch.double)
+            try: 
+                auc = roc_auc_score(binary_targets.cpu().numpy(), probabilities[:, i_k].cpu().numpy())
+                aucs.append(auc)
+            except ValueError:  # This happens when a class isn't present in the targets
+                aucs.append(float('nan'))
+        
+        # valid_aucs = [v for v in aucs if not torch.isnan(torch.tensor(v))]
+        return aucs
 
 def evaluate(model, test_dataloader, K, device, prefix = "", threshold = 0.5, verbose = False, plot_confusion=True):
     print("------------------------------------")
@@ -100,6 +166,7 @@ def evaluate(model, test_dataloader, K, device, prefix = "", threshold = 0.5, ve
         "loss": loss,
         "ece": [],
         "ece_plot": [],
+        "auc": [],
     }
 
     metrics['subset_accuracy'] = torch.mean(torch.all(y_pred == y_test, axis=1).float()).item()
@@ -116,6 +183,8 @@ def evaluate(model, test_dataloader, K, device, prefix = "", threshold = 0.5, ve
     jaccard_per_attribute = intersection / (union + 1e-8)
     metrics['jaccard_score_macro'] = torch.mean(jaccard_per_attribute).item()
     metrics['jaccard_score_per_attribute'] = jaccard_per_attribute.cpu().tolist()
+    metrics["total_brier"] = compute_brier_score(preds, y_test)
+    aucs = compute_auc(preds, y_test)
 
     confidences = model.get_confidences(preds)
 
@@ -130,6 +199,7 @@ def evaluate(model, test_dataloader, K, device, prefix = "", threshold = 0.5, ve
         metrics["accuracy"].append(acc)
         metrics["precision"].append(precision)
         metrics["recall"].append(recall)
+        metrics["auc"].append(aucs[k] if aucs[k] else float('nan'))
 
         y_test_k = y_test[:, k]
         y_pred_k = y_pred[:, k]
@@ -156,6 +226,8 @@ def evaluate(model, test_dataloader, K, device, prefix = "", threshold = 0.5, ve
     metrics['precision_micro'] = (torch.sum(tp) / (torch.sum(tp) + torch.sum(fp) + 1e-8)).item()
     metrics['recall_micro'] = (torch.sum(tp) / (torch.sum(tp) + torch.sum(fn) + 1e-8)).item()
     metrics['f1_micro'] = 2 * metrics['precision_micro'] * metrics['recall_micro'] / (metrics['precision_micro'] + metrics['recall_micro'] + 1e-8)
+
+    metrics["auc_macro"] = torch.mean(torch.tensor(aucs)).item() if aucs else float('nan')
 
     tree_plot = do_tree_predictions(default_dependency(["o", "s", "^", "*"]), y_pred)
     metrics["tree_predictions_plot"] = tree_plot

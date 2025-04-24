@@ -168,8 +168,8 @@ class LogisticModel(LLModel):
             torch.Tensor: The computed training loss.
         """
         data_size = data_size or X_batch.shape[0]
-        preds = self.forward(X_batch)
-        mean_bce = self.loss(preds, y_batch)
+        probs = self.forward(X_batch)
+        mean_bce = self.loss(probs, y_batch)
         mean_reg = self.regularization() / data_size if self.beta else torch.tensor(0.0, device=mean_bce.device)
         if verbose:
             print(f"[Train Loss] BCE: {mean_bce.item()}, Regularization: {mean_reg.item()}")
@@ -207,8 +207,8 @@ class LogisticModel(LLModel):
             torch.Tensor: The computed test loss.
         """
         data_size = data_size or X_batch.shape[0]
-        preds = self.forward(X_batch)
-        mean_bce = self.loss(preds, y_batch)
+        probs = self.forward(X_batch)
+        mean_bce = self.loss(probs, y_batch)
         mean_reg = self.regularization() / data_size if self.beta else torch.tensor(0.0, device=mean_bce.device)
         if verbose:
             print(f"[Test Loss] BCE: {mean_bce.item()}, Regularization: {mean_reg.item()}")
@@ -240,19 +240,19 @@ class LogisticModel(LLModel):
         assert nll.shape == (self.K,), f"nll.shape={nll.shape} != (K={self.K})"
         return nll
 
-    def get_confidences(self, preds):
+    def get_confidences(self, probs):
         """
         Compute the confidence scores for the predictions. The confidence is defined as the maximum 
         between the predicted probability and its complement (1 - predicted probability).
         Args:
-            preds (torch.Tensor): A tensor containing predicted probabilities for each output. 
+            probs (torch.Tensor): A tensor containing predicted probabilities for each output. 
                       Shape should be (n_samples, K), where `n_samples` is the number 
                       of samples and `K` is the number of classes or outputs.
         Returns:
             torch.Tensor: A tensor of confidence scores for each prediction. Shape matches the 
-                  input `preds` tensor.
+                  input `probs` tensor.
         Notes:
-            - This method assumes that `preds` contains probabilities in the range [0, 1].
+            - This method assumes that `probs` contains probabilities in the range [0, 1].
             - The confidence score represents the model's certainty about its predictions.
         """
-        return torch.max(torch.stack([preds, 1 - preds]), dim=0)[0]
+        return torch.max(torch.stack([probs, 1 - probs]), dim=0)[0]
